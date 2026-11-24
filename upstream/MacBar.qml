@@ -2287,13 +2287,41 @@ Scope {
     }
 
     // media
+    property string lastPlayerDbus: ""
+    function playerKey(p) {
+        return p ? String(p.dbusName || p.identity || p.desktopEntry || "") : "";
+    }
     readonly property var player: {
-        var ps = Mpris.players.values, best = null;
+        var ps = Mpris.players.values, best = null, bestScore = -1;
         for (var i = 0; i < ps.length; i++) {
-            if (ps[i].isPlaying) return ps[i];
-            if (!best) best = ps[i];
+            var p = ps[i];
+            if (!p) continue;
+            var k = playerKey(p);
+            var hasTrack = (p.trackTitle || "") !== "";
+            var paused = p.playbackState === MprisPlaybackState.Paused;
+            var playable = p.canPlay === true || p.canPause === true || p.canTogglePlaying === true;
+            var sc = 0;
+            if (p.isPlaying) sc += 1000;
+            if (lastPlayerDbus !== "" && k === lastPlayerDbus && (paused || playable || hasTrack)) sc += 500;
+            if (paused) sc += 250;
+            if (hasTrack) sc += 150;
+            if (playable) sc += 80;
+            if (/spotif|vlc|mpv|cider|amberol|elisa|rhythmbox/i.test(k)) sc += 40;
+            if (sc > bestScore) { bestScore = sc; best = p; }
         }
         return best;
+    }
+    onPlayerChanged: if (player && player.isPlaying) lastPlayerDbus = playerKey(player)
+    function mediaToggle(pl) {
+        if (!pl) return;
+        var k = playerKey(pl);
+        if (k !== "") lastPlayerDbus = k;
+        if (pl.canTogglePlaying === true || (pl.isPlaying ? pl.canPause === true : pl.canPlay === true)) {
+            pl.togglePlaying();
+        } else {
+            var bus = String(pl.dbusName || "").replace(/^org\.mpris\.MediaPlayer2\./, "");
+            if (bus !== "") Quickshell.execDetached(["playerctl", "-p", bus, "play-pause"]);
+        }
     }
 
     // wifi
@@ -9152,9 +9180,11 @@ Scope {
                                             anchors.fill: parent
                                             enabled: np.pl !== null && np.pl !== undefined
                                             onClicked: {
+                                                var k = root.playerKey(np.pl);
+                                                if (k !== "") root.lastPlayerDbus = k;
                                                 if (pbtn.modelData === "prev") np.pl.previous();
                                                 else if (pbtn.modelData === "next") np.pl.next();
-                                                else np.pl.togglePlaying();
+                                                else root.mediaToggle(np.pl);
                                             }
                                         }
                                     }

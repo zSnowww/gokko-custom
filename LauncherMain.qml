@@ -65,6 +65,9 @@ Scope {
     function stateDump() {
         return { open: root.openRequested, query: spotlight.spQuery };
     }
+    function debugResults(q) {
+        return spotlight.homeItems(q);
+    }
 
     function dismissedBySurface() {
         if (!root.openRequested)

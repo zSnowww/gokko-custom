@@ -61,6 +61,8 @@ Scope {
 
     // Background / search indexes
     property var devProjects: []
+    property var devMeta: ({})
+    property var listenPorts: []
     property string fileQuery: ""
     property string fileSearchFor: ""
     property bool fileSearchPending: false
@@ -150,6 +152,32 @@ Scope {
         var d = String(dir || "").trim();
         if (d === "") return;
         Quickshell.execDetached(["sh", "-c", 'cd "$1" && exec ' + root.terminal, "sh", d]);
+    }
+    function openInIde(dir) {
+        var d = String(dir || "").trim();
+        if (d === "") return;
+        Quickshell.execDetached(["sh", "-c", [
+            "for ide in antigravity antigravity-ide code cursor zed; do",
+            "  if command -v \"$ide\" >/dev/null 2>&1; then nohup \"$ide\" \"$1\" >/dev/null 2>&1 & exit 0; fi",
+            "done",
+            "cd \"$1\" && exec " + root.terminal + " -e nvim ."
+        ].join(" "), "sh", d]);
+    }
+    function refreshPorts() {
+        if (!portScanProc.running) portScanProc.running = true;
+    }
+    function inspectDevProject(dir) {
+        if (!dir || dir === "" || devInspectProc.running) return;
+        var cached = devMeta[dir];
+        if (cached && (Date.now() - cached.ts) < 10000) return;
+        devInspectProc.targetPath = dir;
+        devInspectProc.command = ["sh", "-c", [
+            "d=\"$1\"; [ -d \"$d/.git\" ] || exit 0;",
+            "dirty=$(git -C \"$d\" status --porcelain 2>/dev/null | wc -l | tr -d ' ');",
+            "ago=$(git -C \"$d\" log -1 --format='%cr' 2>/dev/null | head -n1);",
+            "printf '%s|%s\\n' \"$dirty\" \"$ago\""
+        ].join(" "), "sh", dir];
+        devInspectProc.running = true;
     }
 
     // Apps catalog (uses Quickshell's already-loaded DesktopEntries in memory)
@@ -246,20 +274,116 @@ Scope {
         launchApp(e);
     }
 
-    // ~/dev + Home file search (runs asynchronously without blocking open)
+    // ~/dev + Home file search + local ports (runs asynchronously without blocking open)
     Process {
         id: devScanProc
         running: true
-        command: ["sh", "-c", "dev=\"$HOME/dev\"; [ -d \"$dev\" ] || exit 0; ls -1At \"$dev\" 2>/dev/null | grep -v '^\\.' | head -n 60 | while IFS= read -r n; do p=\"$dev/$n\"; [ -d \"$p\" ] && printf 'D|%s|%s\\n' \"$n\" \"$p\" || printf 'F|%s|%s\\n' \"$n\" \"$p\"; done"]
+        command: ["sh", "-c", [
+            "dev=\"$HOME/dev\"; [ -d \"$dev\" ] || exit 0;",
+            "ls -1At \"$dev\" 2>/dev/null | grep -v '^\\.' | head -n 60 | while IFS= read -r n; do",
+            "  p=\"$dev/$n\"; br=''; st='';",
+            "  if [ -d \"$p\" ]; then",
+            "    if [ -r \"$p/.git/HEAD\" ]; then",
+            "      read -r hd < \"$p/.git/HEAD\" 2>/dev/null || true;",
+            "      case \"$hd\" in ref:\\ refs/heads/*) br=\"${hd#ref: refs/heads/}\";; *) br=\"${hd%${hd#???????}}\";; esac;",
+            "    fi;",
+            "    if [ -f \"$p/tsconfig.json\" ]; then st='TypeScript';",
+            "    elif [ -f \"$p/package.json\" ]; then st='Node/JS';",
+            "    elif [ -f \"$p/Cargo.toml\" ]; then st='Rust';",
+            "    elif [ -f \"$p/pyproject.toml\" ] || [ -f \"$p/requirements.txt\" ]; then st='Python';",
+            "    elif [ -f \"$p/go.mod\" ]; then st='Go';",
+            "    elif [ -f \"$p/pubspec.yaml\" ]; then st='Flutter';",
+            "    elif [ -f \"$p/flake.nix\" ]; then st='Nix';",
+            "    elif [ -f \"$p/docker-compose.yml\" ] || [ -f \"$p/compose.yaml\" ]; then st='Docker';",
+            "    fi;",
+            "    printf 'D|%s|%s|%s|%s\\n' \"$n\" \"$br\" \"$st\" \"$p\";",
+            "  else",
+            "    printf 'F|%s|||%s\\n' \"$n\" \"$p\";",
+            "  fi;",
+            "done"
+        ].join(" ")]
         stdout: StdioCollector {
             onStreamFinished: {
                 var lines = text.trim().split("\n"), list = [];
                 for (var i = 0; i < lines.length; i++) {
                     var parts = lines[i].split("|");
-                    if (parts.length < 3) continue;
-                    list.push({ isDir: parts[0] === "D", name: parts[1], path: parts.slice(2).join("|") });
+                    if (parts.length < 5) continue;
+                    list.push({
+                        isDir: parts[0] === "D",
+                        name: parts[1],
+                        branch: parts[2] || "",
+                        stack: parts[3] || "",
+                        path: parts.slice(4).join("|")
+                    });
                 }
                 root.devProjects = list;
+            }
+        }
+    }
+    Process {
+        id: devInspectProc
+        property string targetPath: ""
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var p = devInspectProc.targetPath;
+                if (!p) return;
+                var parts = text.trim().split("|");
+                var dirty = parts.length >= 1 && parts[0] !== "" ? (parseInt(parts[0], 10) || 0) : -1;
+                var ago = parts.length >= 2 ? (parts[1] || "") : "";
+                var next = {};
+                for (var k in root.devMeta) next[k] = root.devMeta[k];
+                next[p] = { dirty: dirty, ago: ago, ts: Date.now() };
+                root.devMeta = next;
+            }
+        }
+    }
+    Process {
+        id: portScanProc
+        command: ["sh", "-c", [
+            "ss -tlnpH 2>/dev/null | head -n 50 | while IFS= read -r ln; do",
+            "  addr=$(printf '%s' \"$ln\" | awk '{print $4}');",
+            "  proc=$(printf '%s' \"$ln\" | sed -n 's/.*\"\\([^\"]*\\)\".*/\\1/p');",
+            "  pid=$(printf '%s' \"$ln\" | sed -n 's/.*pid=\\([0-9]\\+\\).*/\\1/p');",
+            "  cwd=''; cmd='';",
+            "  if [ -n \"$pid\" ]; then",
+            "    cwd=$(readlink -f \"/proc/$pid/cwd\" 2>/dev/null || true);",
+            "    cmd=$(tr '\\0' ' ' < \"/proc/$pid/cmdline\" 2>/dev/null | sed -E 's/--(csrf_)?token=[^ ]+//g' | cut -c1-160 || true);",
+            "  fi;",
+            "  printf '%s|%s|%s|%s|%s\\n' \"$addr\" \"$proc\" \"$pid\" \"$cwd\" \"$cmd\";",
+            "done"
+        ].join(" ")]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var lines = text.trim().split("\n"), out = [], seen = {}, i;
+                var home = Quickshell.env("HOME") || "", devRoot = home + "/dev/";
+                for (i = 0; i < lines.length; i++) {
+                    var parts = lines[i].split("|");
+                    if (parts.length < 5) continue;
+                    var addr = parts[0], idx = addr.lastIndexOf(":");
+                    if (idx < 0) continue;
+                    var host = addr.substring(0, idx), port = parseInt(addr.substring(idx + 1), 10);
+                    if (isNaN(port) || seen[port]) continue;
+                    if (host === "127.0.0.53%lo" || host === "127.0.0.54") continue;
+                    seen[port] = true;
+                    var proc = parts[1] || "", pid = parts[2] || "", cwd = parts[3] || "";
+                    var cmd = parts.slice(4).join("|").trim();
+                    var project = "";
+                    if (devRoot !== "" && cwd.indexOf(devRoot) === 0) {
+                        var rel = cwd.substring(devRoot.length);
+                        project = rel.split("/")[0] || "";
+                    }
+                    var shortCwd = (home !== "" && cwd.indexOf(home) === 0) ? ("~" + cwd.substring(home.length)) : cwd;
+                    out.push({
+                        port: port, host: host, proc: proc, pid: pid,
+                        cwd: cwd, shortCwd: shortCwd, project: project, cmd: cmd
+                    });
+                }
+                out.sort(function (a, b) {
+                    var pa = a.project !== "" ? 0 : (a.proc !== "" ? 1 : 2);
+                    var pb = b.project !== "" ? 0 : (b.proc !== "" ? 1 : 2);
+                    return pa !== pb ? pa - pb : a.port - b.port;
+                });
+                root.listenPorts = out;
             }
         }
     }
@@ -382,6 +506,7 @@ Scope {
             { title: I18n.tr("Clipboard History\u2026"), kw: "copy paste cliphist clipboard", sub: I18n.tr("Spotlight"), glyph: "clipboard", stayOpen: true, run: function () { root.setMode("clip"); } },
             { title: I18n.tr("Emoji & Symbols\u2026"), kw: "emoji symbols picker", sub: I18n.tr("Spotlight"), glyph: "smile", stayOpen: true, run: function () { root.setMode("emoji"); } },
             { title: I18n.tr("Search Files in ~/dev\u2026"), kw: "files projects dev folders", sub: I18n.tr("Spotlight"), glyph: "folder", stayOpen: true, run: function () { root.setMode("files"); } },
+            { title: I18n.tr("Local Listening Ports\u2026"), kw: "ports localhost server tcp dev", sub: I18n.tr("Developer"), glyph: "link", stayOpen: true, run: function () { root.setMode("home"); spInput.text = "ports"; root.refreshPorts(); } },
             { title: I18n.tr("Screenshot Selection\u2026"), kw: "capture screen area grim", sub: I18n.tr("Screenshot"), glyph: "photo", run: function () { Quickshell.execDetached(["qs", "-c", "shell", "ipc", "call", "macshell-screenshot", "region"]); } },
             { title: I18n.tr("Screenshot Screen"), kw: "capture screen full", sub: I18n.tr("Screenshot"), glyph: "photo", run: function () { Quickshell.execDetached(["qs", "-c", "shell", "ipc", "call", "macshell-screenshot", "screen"]); } },
             { title: I18n.tr("Pick Color"), kw: "color dropper hex hyprpicker", sub: I18n.tr("Utilities"), glyph: "camera", run: function () { root.sh("c=$(hyprpicker -a) && [ -n \"$c\" ] && notify-send -a macbar 'Color copied' \"$c\""); } },
@@ -409,19 +534,32 @@ Scope {
         return out;
     }
 
-    function makePathResult(p, isDir, section) {
+    function makePathResult(p, isDir, section, meta) {
         var name = p.substring(p.lastIndexOf("/") + 1) || p;
         var home = Quickshell.env("HOME") || "";
         var shortPath = (home !== "" && p.indexOf(home) === 0) ? ("~" + p.substring(home.length)) : p;
+        var br = (meta && meta.branch) ? meta.branch : "";
+        var stk = (meta && meta.stack) ? meta.stack : "";
+        var subLine = (br || stk) ? [br, stk].filter(function (x) { return x !== ""; }).join(" · ") : shortPath;
+        var isDevProject = isDir && section === "Projects in ~/dev";
         var item = {
-            title: name, sub: shortPath, section: section || "Files",
+            title: name, sub: subLine, section: section || "Files",
             previewKind: isDir ? "project" : "file",
             path: shortPath, fullPath: p, glyph: isDir ? "folder" : "doc", icon: "",
-            run: function () { Quickshell.execDetached(["xdg-open", p]); }
+            branch: br, stack: stk,
+            run: isDevProject
+                ? (function (dir) { return function () { root.openInIde(dir); }; })(p)
+                : (function (fp) { return function () { Quickshell.execDetached(["xdg-open", fp]); }; })(p)
         };
-        if (isDir) {
-            item.altLabel = I18n.tr("Terminal");
-            item.altRun = function () { root.openFolderInTerminal(p); };
+        if (isDevProject) {
+            item.priLabel = I18n.tr("IDE");
+            item.altLabel = I18n.tr("Term");
+            item.altRun = (function (dir) { return function () { root.openFolderInTerminal(dir); }; })(p);
+            item.terLabel = I18n.tr("Files");
+            item.terRun = (function (dir) { return function () { Quickshell.execDetached(["xdg-open", dir]); }; })(p);
+        } else if (isDir) {
+            item.altLabel = I18n.tr("Term");
+            item.altRun = (function (dir) { return function () { root.openFolderInTerminal(dir); }; })(p);
         }
         return item;
     }
@@ -433,11 +571,59 @@ Scope {
             else if (n === s) sc = 100;
             else if (n.indexOf(s) === 0) sc = 80;
             else if (n.indexOf(s) >= 0) sc = 50;
+            else if ((d.branch && d.branch.toLowerCase().indexOf(s) >= 0) || (d.stack && d.stack.toLowerCase().indexOf(s) >= 0)) sc = 30;
             if (sc > 0) hits.push({ d: d, sc: sc });
         }
         if (s !== "") hits.sort(function (a, b) { return b.sc - a.sc; });
         for (i = 0; i < hits.length && out.length < (limit || 6); i++)
-            out.push(makePathResult(hits[i].d.path, hits[i].d.isDir, "Projects in ~/dev"));
+            out.push(makePathResult(hits[i].d.path, hits[i].d.isDir, "Projects in ~/dev", hits[i].d));
+        return out;
+    }
+    function portItems(q) {
+        var raw = String(q || "").trim(), s = raw.toLowerCase(), out = [], i;
+        var portFilter = "";
+        var isPorts = false;
+        if (/^(?:ports?|puertos?|localhost)(?:\s+(.*))?$/.test(s)) {
+            isPorts = true;
+            portFilter = s.replace(/^(?:ports?|puertos?|localhost)\s*/, "").trim();
+        } else if (/^:\d{1,5}$/.test(s) || /^\d{2,5}$/.test(s)) {
+            isPorts = true;
+            portFilter = s.replace(/^:/, "");
+        }
+        if (!isPorts) return out;
+        var ps = listenPorts || [];
+        for (i = 0; i < ps.length && out.length < 10; i++) {
+            var p = ps[i], psStr = String(p.port);
+            if (portFilter !== "") {
+                var hay = (psStr + " " + p.project + " " + p.proc + " " + p.shortCwd + " " + p.cmd).toLowerCase();
+                if (hay.indexOf(portFilter) < 0) continue;
+            }
+            var url = "http://localhost:" + psStr;
+            var owner = p.project !== "" ? p.project : (p.proc !== "" ? p.proc : I18n.tr("System / root"));
+            var cmdShort = p.cmd !== "" ? p.cmd.replace(/^\/\S+\/([^\/\s]+)/, "$1") : "";
+            var subText = p.shortCwd !== "" ? p.shortCwd : (p.proc !== "" ? p.proc : (p.host + ":" + psStr));
+            var item = {
+                title: ":" + psStr + " · " + owner,
+                sub: subText,
+                section: "Local Ports", previewKind: "port",
+                detail: cmdShort !== "" ? cmdShort : url,
+                path: p.shortCwd || url,
+                portProject: p.project,
+                portProc: p.proc,
+                portPid: p.pid,
+                portAddr: p.host + ":" + psStr,
+                glyph: "link", icon: "",
+                priLabel: I18n.tr("Firefox"),
+                altLabel: I18n.tr("Copy"),
+                run: (function (u) { return function () { root.openInFirefox(u); }; })(url),
+                altRun: (function (u) { return function () { Quickshell.execDetached(["wl-copy", u]); }; })(url)
+            };
+            if (p.cwd !== "") {
+                item.terLabel = I18n.tr("IDE");
+                item.terRun = (function (dir) { return function () { root.openInIde(dir); }; })(p.cwd);
+            }
+            out.push(item);
+        }
         return out;
     }
     function filesModeItems(q) {
@@ -457,17 +643,16 @@ Scope {
     }
     function windowItems(q) {
         var out = [], s = (q || "").trim().toLowerCase(); if (!s) return out;
-        var wins = Wm.windows || [];
+        var wins = ToplevelManager.toplevels ? (ToplevelManager.toplevels.values || []) : [];
         for (var i = 0; i < wins.length && out.length < 4; i++) {
             var w = wins[i], title = String(w.title || ""), cls = String(w.appId || ""), app = lookupApp(cls);
             var label = title || (app && app.name) || cls;
             if ((label + " " + cls + " " + (app ? app.name : "")).toLowerCase().indexOf(s) < 0) continue;
-            var wid = String(w.id);
             out.push({
                 title: label, sub: I18n.tr("Open Window"), section: "Open Windows",
                 previewKind: "window", detail: (app ? app.name : cls),
                 icon: app ? iconSrc(app.icon) : "", glyph: "layers",
-                run: (function (id) { return function () { Wm.focusWindow(id); }; })(wid)
+                run: (function (tl) { return function () { if (tl) tl.activate(); }; })(w)
             });
         }
         return out;
@@ -525,6 +710,8 @@ Scope {
                 run: function () { root.openInFirefox(url); }
             });
         }
+        var pHits = portItems(raw);
+        for (i = 0; i < pHits.length; i++) out.push(pHits[i]);
         var apps = searchApps(raw);
         for (i = 0; i < apps.length && i < 4; i++) {
             out.push({
@@ -585,6 +772,7 @@ Scope {
         if (emojiLoader.item) emojiLoader.item.queryInput.text = "";
         updateFileSearch("");
         if (!devScanProc.running) devScanProc.running = true;
+        refreshPorts();
         if (spMode === "clip") clipRefresh();
         spotOpen = true;
         spFocusTimer.restart();
@@ -633,6 +821,10 @@ Scope {
                 var cIt = spResults[Math.min(spSel, n - 1)];
                 closeSpotlight();
                 clipPick(cIt, false);
+            } else if (!spFull && (ev.modifiers & Qt.ControlModifier) && n > 0) {
+                var tIt = spResults[Math.min(spSel, n - 1)];
+                if (tIt && tIt.terRun) { closeSpotlight(); tIt.terRun(); }
+                else activate(Math.min(spSel, n - 1));
             } else if (!spFull && (ev.modifiers & Qt.ShiftModifier) && n > 0) {
                 var aIt = spResults[Math.min(spSel, n - 1)];
                 if (aIt && aIt.altRun) { closeSpotlight(); aIt.altRun(); }
@@ -805,6 +997,7 @@ Scope {
                         width: spot.width - 5 * 60
                         height: 48
                         SpotGlass { anchors.fill: parent; cornerR: 24; shadowAmt: 0.08 }
+                        MouseArea { anchors.fill: parent; onPressed: spInput.forceActiveFocus() }
                         MacParts.MacGlyph { x: 18; anchors.verticalCenter: parent.verticalCenter; width: 18; height: 18; kind: "search"; color: panelPal.fg2 }
                         MacParts.MorphText {
                             x: 49; width: spInput.width; anchors.verticalCenter: parent.verticalCenter
@@ -818,6 +1011,7 @@ Scope {
                         TextInput {
                             id: spInput
                             x: 46; width: parent.width - 64; anchors.verticalCenter: parent.verticalCenter
+                            focus: root.spotOpen && !root.spFull
                             clip: true; color: panelPal.fg
                             selectionColor: root.accent; selectedTextColor: "white"
                             font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 17
@@ -830,6 +1024,7 @@ Scope {
                                         var fq = text.replace(/^(file|find)\s+/i, "").trim();
                                         if (/^(file|find)\s+/i.test(text) || root.spMode === "files" || fq.length >= 2) root.updateFileSearch(fq);
                                         else root.updateFileSearch("");
+                                        if (/^(?:ports?|puertos?|localhost|:\d+)/i.test(text.trim())) root.refreshPorts();
                                     }
                                 }
                             }
@@ -890,6 +1085,7 @@ Scope {
                     Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutQuint } }
 
                     SpotGlass { anchors.fill: parent; cornerR: 26; shadowAmt: 0.14 }
+                    MouseArea { anchors.fill: parent }
 
                     ListView {
                         id: spList
@@ -972,10 +1168,14 @@ Scope {
                         width: parent.width - resPanel.listW - 9; height: parent.height - 16
                         readonly property var cur: resPanel.selItem
                         readonly property string kind: cur && cur.previewKind ? cur.previewKind : ""
+                        readonly property var gitMeta: (cur && cur.fullPath && root.devMeta[cur.fullPath]) ? root.devMeta[cur.fullPath] : null
+                        onCurChanged: {
+                            if (cur && cur.previewKind === "project" && cur.fullPath) root.inspectDevProject(cur.fullPath);
+                        }
 
                         Column {
                             anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: previewFooter.top
-                            anchors.margins: 14; anchors.topMargin: 16; spacing: 10
+                            anchors.margins: 14; anchors.topMargin: 16; spacing: 8
                             visible: spPreview.cur !== null
 
                             Column {
@@ -991,18 +1191,83 @@ Scope {
                             }
 
                             Column {
-                                visible: spPreview.kind !== "calc"; width: parent.width; spacing: 10
+                                visible: spPreview.kind !== "calc"; width: parent.width; spacing: 8
                                 Item {
-                                    anchors.horizontalCenter: parent.horizontalCenter; width: 62; height: 62
-                                    Rectangle { visible: !spPreview.cur || !spPreview.cur.icon || spPreview.cur.icon === ""; anchors.fill: parent; radius: 16; color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06); border.width: 1; border.color: panelPal.sep }
-                                    Image { visible: spPreview.cur && spPreview.cur.icon && spPreview.cur.icon !== ""; anchors.fill: parent; source: (spPreview.cur && spPreview.cur.icon) ? spPreview.cur.icon : ""; sourceSize: Qt.size(128, 128); fillMode: Image.PreserveAspectFit; asynchronous: true; smooth: true }
-                                    MacParts.MacGlyph { visible: !spPreview.cur || !spPreview.cur.icon || spPreview.cur.icon === ""; anchors.centerIn: parent; width: 28; height: 28; kind: (spPreview.cur && spPreview.cur.glyph) ? spPreview.cur.glyph : "search"; color: spPreview.kind === "project" ? root.accent : panelPal.fg }
+                                    anchors.horizontalCenter: parent.horizontalCenter; width: 58; height: 58
+                                    Rectangle { visible: !(spPreview.cur && spPreview.cur.icon && spPreview.cur.icon !== ""); anchors.fill: parent; radius: 16; color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06); border.width: 1; border.color: panelPal.sep }
+                                    Image { visible: !!(spPreview.cur && spPreview.cur.icon && spPreview.cur.icon !== ""); anchors.fill: parent; source: (spPreview.cur && spPreview.cur.icon) ? spPreview.cur.icon : ""; sourceSize: Qt.size(128, 128); fillMode: Image.PreserveAspectFit; asynchronous: true; smooth: true }
+                                    MacParts.MacGlyph { visible: !(spPreview.cur && spPreview.cur.icon && spPreview.cur.icon !== ""); anchors.centerIn: parent; width: 26; height: 26; kind: (spPreview.cur && spPreview.cur.glyph) ? spPreview.cur.glyph : "search"; color: (spPreview.kind === "project" || spPreview.kind === "port") ? root.accent : panelPal.fg }
                                 }
                                 Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight; maximumLineCount: 2; wrapMode: Text.Wrap; text: spPreview.cur ? spPreview.cur.title : ""; color: panelPal.fg; font.family: root.fontForWeight(Font.DemiBold, panelPal.fam); font.pixelSize: 15; font.weight: Font.DemiBold }
                                 Text {
-                                    width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WrapAnywhere; maximumLineCount: 3; elide: Text.ElideMiddle
+                                    width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideMiddle
                                     text: !spPreview.cur ? "" : (spPreview.cur.path || spPreview.cur.detail || spPreview.cur.sub || "")
                                     color: panelPal.fg2; font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 11
+                                }
+                                // Dev project Git & Stack badges
+                                Row {
+                                    visible: spPreview.kind === "project" && (Boolean(spPreview.cur && (spPreview.cur.branch || spPreview.cur.stack)) || spPreview.gitMeta !== null)
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 6
+                                    Rectangle {
+                                        visible: !!(spPreview.cur && spPreview.cur.branch && spPreview.cur.branch !== "")
+                                        width: brTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, root.panelDarkMode ? 0.22 : 0.14)
+                                        Text { id: brTxt; anchors.centerIn: parent; text: (spPreview.cur && spPreview.cur.branch) ? ("git:" + spPreview.cur.branch) : ""; color: root.accent; font.family: root.fontForWeight(Font.DemiBold, panelPal.fam); font.pixelSize: 10; font.weight: Font.DemiBold }
+                                    }
+                                    Rectangle {
+                                        visible: !!(spPreview.cur && spPreview.cur.stack && spPreview.cur.stack !== "")
+                                        width: stkTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06)
+                                        Text { id: stkTxt; anchors.centerIn: parent; text: (spPreview.cur && spPreview.cur.stack) ? spPreview.cur.stack : ""; color: panelPal.fg; font.family: root.fontForWeight(Font.Medium, panelPal.fam); font.pixelSize: 10; font.weight: Font.Medium }
+                                    }
+                                    Rectangle {
+                                        visible: spPreview.gitMeta !== null && spPreview.gitMeta.dirty >= 0
+                                        width: stTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: (spPreview.gitMeta && spPreview.gitMeta.dirty > 0) ? Qt.rgba(1.0, 0.62, 0.04, 0.20) : Qt.rgba(0.19, 0.82, 0.35, 0.18)
+                                        Text {
+                                            id: stTxt; anchors.centerIn: parent
+                                            text: !spPreview.gitMeta ? "" : (spPreview.gitMeta.dirty > 0 ? (spPreview.gitMeta.dirty + " " + I18n.tr("modified")) : I18n.tr("clean"))
+                                            color: (spPreview.gitMeta && spPreview.gitMeta.dirty > 0) ? "#FF9F0A" : "#30D158"
+                                            font.family: root.fontForWeight(Font.DemiBold, panelPal.fam); font.pixelSize: 10; font.weight: Font.DemiBold
+                                        }
+                                    }
+                                }
+                                Text {
+                                    visible: spPreview.kind === "project" && spPreview.gitMeta !== null && Boolean(spPreview.gitMeta.ago)
+                                    width: parent.width; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                                    text: (spPreview.gitMeta && spPreview.gitMeta.ago) ? (I18n.tr("Last commit: ") + spPreview.gitMeta.ago) : ""
+                                    color: panelPal.fg3; font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 10
+                                }
+                                // Port process / project / command details
+                                Row {
+                                    visible: spPreview.kind === "port"
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 6
+                                    Rectangle {
+                                        visible: !!(spPreview.cur && spPreview.cur.portProject)
+                                        width: ppTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, root.panelDarkMode ? 0.22 : 0.14)
+                                        Text { id: ppTxt; anchors.centerIn: parent; text: (spPreview.cur && spPreview.cur.portProject) ? spPreview.cur.portProject : ""; color: root.accent; font.family: root.fontForWeight(Font.DemiBold, panelPal.fam); font.pixelSize: 10; font.weight: Font.DemiBold }
+                                    }
+                                    Rectangle {
+                                        visible: !!(spPreview.cur && spPreview.cur.portProc)
+                                        width: prTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06)
+                                        Text { id: prTxt; anchors.centerIn: parent; text: (spPreview.cur && spPreview.cur.portProc) ? (spPreview.cur.portProc + (spPreview.cur.portPid ? (" #" + spPreview.cur.portPid) : "")) : ""; color: panelPal.fg; font.family: root.fontForWeight(Font.Medium, panelPal.fam); font.pixelSize: 10; font.weight: Font.Medium }
+                                    }
+                                    Rectangle {
+                                        visible: !!(spPreview.cur && spPreview.cur.portAddr)
+                                        width: paTxt.implicitWidth + 12; height: 20; radius: 10
+                                        color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.05)
+                                        Text { id: paTxt; anchors.centerIn: parent; text: (spPreview.cur && spPreview.cur.portAddr) ? spPreview.cur.portAddr : ""; color: panelPal.fg2; font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 10 }
+                                    }
+                                }
+                                Text {
+                                    visible: spPreview.kind === "port" && Boolean(spPreview.cur && spPreview.cur.detail)
+                                    width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WrapAnywhere; maximumLineCount: 2; elide: Text.ElideRight
+                                    text: (spPreview.cur && spPreview.cur.detail) ? spPreview.cur.detail : ""
+                                    color: panelPal.fg3; font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 10
                                 }
                             }
                         }
@@ -1013,20 +1278,20 @@ Scope {
                             visible: spPreview.cur !== null
                             Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: panelPal.sep }
                             Row {
-                                anchors.centerIn: parent; anchors.verticalCenterOffset: 4; spacing: 8
+                                anchors.centerIn: parent; anchors.verticalCenterOffset: 4; spacing: 6
                                 Rectangle {
-                                    width: priTxt.implicitWidth + 18; height: 24; radius: 8
+                                    width: priTxt.implicitWidth + 14; height: 24; radius: 8
                                     color: priMa.containsMouse ? root.accent : (root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08))
                                     Text {
                                         id: priTxt; anchors.centerIn: parent
-                                        text: spPreview.kind === "calc" ? I18n.tr("Copy (\u21b5)") : (spPreview.kind === "web" ? I18n.tr("Firefox (\u21b5)") : (spPreview.kind === "window" ? I18n.tr("Focus (\u21b5)") : (spPreview.kind === "action" ? I18n.tr("Run (\u21b5)") : I18n.tr("Open (\u21b5)"))))
+                                        text: (spPreview.cur && spPreview.cur.priLabel) ? (spPreview.cur.priLabel + " (\u21b5)") : (spPreview.kind === "calc" ? I18n.tr("Copy (\u21b5)") : (spPreview.kind === "web" ? I18n.tr("Firefox (\u21b5)") : (spPreview.kind === "window" ? I18n.tr("Focus (\u21b5)") : (spPreview.kind === "action" ? I18n.tr("Run (\u21b5)") : I18n.tr("Open (\u21b5)")))))
                                         color: priMa.containsMouse ? "white" : panelPal.fg; font.family: root.fontForWeight(Font.Medium, panelPal.fam); font.pixelSize: 11; font.weight: Font.Medium
                                     }
                                     MouseArea { id: priMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.activate(resPanel.selIdx) }
                                 }
                                 Rectangle {
-                                    visible: spPreview.cur && spPreview.cur.altRun !== undefined
-                                    width: altTxt.implicitWidth + 18; height: 24; radius: 8
+                                    visible: !!(spPreview.cur && spPreview.cur.altRun !== undefined)
+                                    width: altTxt.implicitWidth + 14; height: 24; radius: 8
                                     color: altMa.containsMouse ? root.accent : (root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08))
                                     Text {
                                         id: altTxt; anchors.centerIn: parent
@@ -1036,6 +1301,20 @@ Scope {
                                     MouseArea {
                                         id: altMa; anchors.fill: parent; hoverEnabled: true
                                         onClicked: { if (spPreview.cur && spPreview.cur.altRun) { var fn = spPreview.cur.altRun; root.closeSpotlight(); fn(); } }
+                                    }
+                                }
+                                Rectangle {
+                                    visible: !!(spPreview.cur && spPreview.cur.terRun !== undefined)
+                                    width: terTxt.implicitWidth + 14; height: 24; radius: 8
+                                    color: terMa.containsMouse ? root.accent : (root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08))
+                                    Text {
+                                        id: terTxt; anchors.centerIn: parent
+                                        text: (spPreview.cur && spPreview.cur.terLabel) ? (spPreview.cur.terLabel + " (^\u21b5)") : ""
+                                        color: terMa.containsMouse ? "white" : panelPal.fg; font.family: root.fontForWeight(Font.Medium, panelPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                    }
+                                    MouseArea {
+                                        id: terMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: { if (spPreview.cur && spPreview.cur.terRun) { var fn = spPreview.cur.terRun; root.closeSpotlight(); fn(); } }
                                     }
                                 }
                             }
