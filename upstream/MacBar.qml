@@ -89,10 +89,12 @@ Scope {
     // launcherOnly is true only when this component is hosted by the separate RyoStore app launcher.
     // That instance reuses the Spotlight UI/shaders and Gokko's settings, without displaying a second bar.
     property bool launcherOnly: false
+    property bool perfNoFocus: false
     property string launcherMonitor: ""
     property bool launcherOpenRequested: false
     property string launcherQuery: ""
     signal launcherDismissed()
+    signal launcherOpenModeRequested()
     // every part of the shell can be switched off on its own (the installer's feature picker writes these too)
     property bool barEnabled: true           // the menu bar strip itself
     property bool spotlightEnabled: true     // persisted for compatibility; the embedded panel is no longer shown in Gokko's bar
@@ -326,6 +328,7 @@ Scope {
     property string fileSearchFor: ""
     property bool fileSearchPending: false
     property var fileHits: []
+    property var devProjects: []
 
     readonly property var settingKeys: ["barEnabled", "darkMode", "appearanceMode", "accent", "fontFamily", "barHeight", "glassOpacity",
         "barStyle", "barGlass", "glassRim", "glassGrain", "glassLiquid", "glassBlur", "barBgOpacity", "glassRealtime", "liveWallGlass", "glassDebug", "wallpaperPath", "use24h", "language", "showDate",
@@ -1082,10 +1085,10 @@ Scope {
                 id: lg
                 readonly property real m: 72     // extra backdrop captured around the slab (refraction + blur reach)
                 readonly property real p: 10     // shader padding (drop shadow)
-                // a Gaussian blur of 8 px or more doesn't need full resolution: blurring at half size is visually identical
-                // and costs a quarter of the GPU work, every frame
-                readonly property real ds: g.blur >= 8 ? 0.5 : 1.0
-                readonly property real bn: g.blur * 1.4 * ds / 64.0     // blur amount in MultiEffect units (at the reduced size)
+                // Light pre-smoothing only: the shader handles interior frosted blur while keeping
+                // the curved bezel sharp enough so lines behind the glass visibly bend and refract.
+                readonly property real ds: 1.0
+                readonly property real bn: Math.min(0.14, (1.5 + g.blur * 0.14) / 64.0)
                 ShaderEffectSource {
                     id: bsrc
                     sourceItem: g.backdrop
@@ -1112,6 +1115,7 @@ Scope {
                     id: bblur
                     sourceItem: bblurFx
                     live: true
+                    mipmap: true
                     visible: false
                 }
                 MultiEffect {
@@ -1130,6 +1134,7 @@ Scope {
                     // the 2nd pass is a pure copy unless the blur radius exceeds one pass: skip it then (same pixels, one GPU pass less)
                     sourceItem: lg.bn > 1.0 ? bblur2Fx : null
                     live: true
+                    mipmap: true
                     visible: false
                 }
                 ShaderEffect {
@@ -1150,19 +1155,19 @@ Scope {
                     property vector2d srcOffset: Qt.vector2d(lg.m, lg.m)
                     property real pad: lg.p
                     property real radius: g.cornerR
-                    property real bezel: Math.min(g.height * 0.36, 26)
-                    property real thickness: g.thickness * g.strength * 1.6      // bar popovers: boosted to match the stronger dock glass
-                    property real dispersion: 0.06 * g.strength * 1.3
-                    property real magnify: 0.05 * g.strength * 1.6
-                    property real rim: g.rim
-                    property real grain: g.grain * 0.2
-                    property real blurPx: 1.5
-                    property real tintMix: g.tint * 0.55
-                    property real saturation: 1.25
+                    property real bezel: Math.min(g.height * 0.34, 22)
+                    property real thickness: g.thickness * g.strength * 0.95
+                    property real dispersion: 0.055 * g.strength
+                    property real magnify: 0.045 * g.strength
+                    property real rim: Math.max(0.45, g.rim)
+                    property real grain: g.grain * 0.25
+                    property real blurPx: 2.5 + Math.min(18.0, g.blur * 0.36)
+                    property real tintMix: g.tint * 0.45
+                    property real saturation: 1.32
                     property real dark: g.dark ? 1 : 0
                     property real debug: g.debug ? 1 : 0
                     property real shadowAmt: g.shadowAmt
-                    property real flatInner: g.flatInner
+                    property real flatInner: 1
                     property real rimTint: g.rimTint
                     property real ringW: g.ringW
                 }
@@ -1223,7 +1228,7 @@ Scope {
             width: pgSrc.sourceRect.width; height: pgSrc.sourceRect.height
             blurEnabled: true
             blurMax: 64
-            blur: Math.min(1.0, (pgc.blur * pgc.blurMul) * 1.4 / 64.0)
+            blur: Math.min(0.16, (1.5 + (pgc.blur * pgc.blurMul) * 0.16) / 64.0)
             autoPaddingEnabled: false
             visible: false
         }
@@ -1231,6 +1236,7 @@ Scope {
             id: pgBlur
             sourceItem: pgFx
             live: pg.pop.visible
+            mipmap: true
             visible: false
         }
         GlassCtx {
@@ -1241,16 +1247,16 @@ Scope {
             liquid: root.liquidActive
             shaderUrl: root.glassShaderUrl
             dark: root.effDark
-            tint: root.glassOpacity
+            tint: root.glassOpacity * 0.72
             strength: root.glassLiquid
-            rim: root.glassRim * 0.25
+            rim: root.glassRim * 1.15
             rimTint: 1
             ringW: 0
             borderTint: root.menuBorderColor
             borderAmount: 1
             whiteEdge: false
             grain: root.glassGrain
-            blur: pg.fromCC ? root.glassBlur : pg.topBarBlur
+            blur: pg.fromCC ? Math.max(10, root.glassBlur) : Math.max(14, root.glassBlur)
             debug: root.glassDebug
             onFailed: root.glassState = "failed"
         }
@@ -1313,19 +1319,19 @@ Scope {
                                                              gg.fp.y - gg.pad - gg.gx.srcRect.y)
                     property real pad: gg.pad
                     property real radius: gg.cornerR
-                    property real bezel: Math.min(gg.height * 0.36, 26)
-                    property real thickness: gg.thickness * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul * 1.6
-                    property real dispersion: 0.06 * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul * 1.3
-                    property real magnify: 0.05 * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul * 1.6
+                    property real bezel: Math.min(gg.height * 0.34, 22)
+                    property real thickness: gg.thickness * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul * 0.95
+                    property real dispersion: 0.055 * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul
+                    property real magnify: 0.045 * gg.gx.strength * gg.strengthMul * gg.gx.liquidMul
                     property real rim: gg.gx.rim
-                    property real grain: gg.gx.grain * 0.2
-                    property real blurPx: 1.5
-                    property real tintMix: gg.gx.tint * 0.55 * gg.tintMul
-                    property real saturation: 1.25
+                    property real grain: gg.gx.grain * 0.25
+                    property real blurPx: 2.5 + Math.min(18.0, gg.gx.blur * gg.gx.blurMul * 0.36)
+                    property real tintMix: gg.gx.tint * 0.45 * gg.tintMul
+                    property real saturation: 1.32
                     property real dark: gg.gx.dark ? 1 : 0
                     property real debug: gg.gx.debug ? 1 : 0
                     property real shadowAmt: gg.shadowAmt
-                    property real flatInner: gg.flatInner
+                    property real flatInner: 1
                     property real rimTint: gg.gx.rimTint
                     property real ringW: gg.gx.ringW
                 }
@@ -2172,6 +2178,113 @@ Scope {
     }
     readonly property bool charging: hasBattery && (bat.state === UPowerDeviceState.Charging
                                                      || bat.state === UPowerDeviceState.FullyCharged)
+    property bool acOnline: false
+    property real batPowerW: 0
+    property real acInputW: -1
+    property real batVoltageV: 0
+    property real batEnergyWh: 0
+    property real batFullWh: 0
+    property real batDesignWh: 0
+    property string batSysStatus: ""
+    property bool batConservationMode: false
+    property int batChargeLimit: 0
+    readonly property bool energyPassthrough: hasBattery && acOnline && (
+        batSysStatus === "Not charging"
+        || batSysStatus === "Full"
+        || bat.state === UPowerDeviceState.PendingCharge
+        || bat.state === UPowerDeviceState.FullyCharged
+        || (batConservationMode && batPowerW < 0.25)
+    )
+    readonly property real effectiveBatWatts: batPowerW > 0.01 ? batPowerW : (bat && bat.energyRate > 0.01 ? Math.abs(bat.energyRate) : 0)
+    readonly property int batHealthPct: (batDesignWh > 0 && batFullWh > 0) ? Math.min(100, Math.round(batFullWh / batDesignWh * 100)) : 0
+    readonly property string batFlowLabel: energyPassthrough
+        ? I18n.tr("Battery Bypass")
+        : ((batSysStatus === "Charging" || charging) ? I18n.tr("Charging Rate") : I18n.tr("Battery Draw"))
+    readonly property string batFlowValue: energyPassthrough
+        ? "0.0 W"
+        : (((batSysStatus === "Charging" || charging) ? "+" : "-") + effectiveBatWatts.toFixed(1) + " W")
+    readonly property string batStatusText: {
+        if (!hasBattery) return "";
+        if (bat.state === UPowerDeviceState.FullyCharged) return I18n.tr("Fully Charged");
+        if (charging) {
+            if (bat.timeToFull > 0) {
+                var hf = Math.floor(bat.timeToFull / 3600), mf = Math.round((bat.timeToFull % 3600) / 60);
+                return I18n.tr("Charging") + " · " + (hf > 0 ? hf + " h " : "") + mf + " " + I18n.tr("min until full");
+            }
+            return I18n.tr("Charging");
+        }
+        if (energyPassthrough) {
+            var cap = batChargeLimit > 0 ? batChargeLimit : (batConservationMode ? 80 : 0);
+            return I18n.tr("Energy Passthrough") + (cap > 0 ? " · " + I18n.tr("Limit ") + cap + "%" : "");
+        }
+        if (bat.timeToEmpty > 0) {
+            var h = Math.floor(bat.timeToEmpty / 3600), m = Math.round((bat.timeToEmpty % 3600) / 60);
+            return (h > 0 ? h + " h " : "") + m + I18n.tr(" min remaining");
+        }
+        return acOnline ? I18n.tr("Connected to AC") : I18n.tr("On Battery");
+    }
+    property string powerProfile: "balanced"
+    function refreshPowerProfile() { if (hasBattery && !ppGetProc.running) ppGetProc.running = true; }
+    function refreshBatteryTelemetry() { if (hasBattery && !batStatsProc.running) batStatsProc.running = true; }
+    function setPowerProfile(p) {
+        powerProfile = p;
+        Quickshell.execDetached(["powerprofilesctl", "set", p]);
+    }
+    Process {
+        id: ppGetProc
+        running: root.hasBattery
+        command: ["powerprofilesctl", "get"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var t = text.trim();
+                if (t !== "") root.powerProfile = t;
+            }
+        }
+    }
+    Process {
+        id: batStatsProc
+        running: root.hasBattery
+        command: ["sh", "-c", [
+            "ac_on=0; ac_w=-1; b_st=''; b_pw=0; b_vn=0; b_en=0; b_ef=0; b_ed=0; b_lim=0; cons=0",
+            "for d in /sys/class/power_supply/*; do",
+            "  [ -r \"$d/type\" ] || continue",
+            "  read -r tp < \"$d/type\" 2>/dev/null || continue",
+            "  if [ \"$tp\" = 'Mains' ]; then",
+            "    [ -r \"$d/online\" ] && read -r on < \"$d/online\" 2>/dev/null && [ \"$on\" = '1' ] && ac_on=1",
+            "    if [ -r \"$d/power_now\" ]; then read -r apw < \"$d/power_now\" 2>/dev/null && ac_w=\"$apw\";",
+            "    elif [ -r \"$d/current_now\" ] && [ -r \"$d/voltage_now\" ]; then read -r ci < \"$d/current_now\"; read -r vi < \"$d/voltage_now\"; ac_w=$(awk -v c=\"$ci\" -v v=\"$vi\" 'BEGIN{printf \"%.0f\", (c*v)/1000000}'); fi",
+            "  elif [ \"$tp\" = 'Battery' ] && [ \"$b_st\" = '' ]; then",
+            "    [ -r \"$d/status\" ] && read -r b_st < \"$d/status\" 2>/dev/null",
+            "    if [ -r \"$d/power_now\" ]; then read -r b_pw < \"$d/power_now\" 2>/dev/null",
+            "    elif [ -r \"$d/current_now\" ] && [ -r \"$d/voltage_now\" ]; then read -r bi < \"$d/current_now\"; read -r bv < \"$d/voltage_now\"; b_pw=$(awk -v c=\"$bi\" -v v=\"$bv\" 'BEGIN{printf \"%.0f\", (c*v)/1000000}'); fi",
+            "    [ -r \"$d/voltage_now\" ] && read -r b_vn < \"$d/voltage_now\" 2>/dev/null",
+            "    [ -r \"$d/energy_now\" ] && read -r b_en < \"$d/energy_now\" 2>/dev/null",
+            "    [ -r \"$d/energy_full\" ] && read -r b_ef < \"$d/energy_full\" 2>/dev/null",
+            "    [ -r \"$d/energy_full_design\" ] && read -r b_ed < \"$d/energy_full_design\" 2>/dev/null",
+            "    [ -r \"$d/charge_control_end_threshold\" ] && read -r b_lim < \"$d/charge_control_end_threshold\" 2>/dev/null",
+            "  fi",
+            "done",
+            "for cm in /sys/bus/platform/drivers/ideapad_acpi/*/conservation_mode; do [ -r \"$cm\" ] && read -r cons < \"$cm\" 2>/dev/null && break; done",
+            "printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\\n' \"$ac_on\" \"$ac_w\" \"$b_st\" \"$b_pw\" \"$b_vn\" \"$b_en\" \"$b_ef\" \"$b_ed\" \"$b_lim\" \"$cons\""
+        ].join("\n")]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var p = text.trim().split("|");
+                if (p.length < 10) return;
+                root.acOnline = p[0] === "1";
+                var acMicro = Number(p[1]);
+                root.acInputW = acMicro >= 0 ? Math.abs(acMicro) / 1e6 : -1;
+                root.batSysStatus = p[2] || "";
+                root.batPowerW = Math.abs(Number(p[3]) || 0) / 1e6;
+                root.batVoltageV = (Number(p[4]) || 0) / 1e6;
+                root.batEnergyWh = (Number(p[5]) || 0) / 1e6;
+                root.batFullWh = (Number(p[6]) || 0) / 1e6;
+                root.batDesignWh = (Number(p[7]) || 0) / 1e6;
+                root.batChargeLimit = parseInt(p[8], 10) || 0;
+                root.batConservationMode = p[9] === "1";
+            }
+        }
+    }
 
     // media
     readonly property var player: {
@@ -2876,20 +2989,67 @@ Scope {
         return m + ":" + (r < 10 ? "0" : "") + r;
     }
     function pickColor() { sh("c=$(hyprpicker -a) && [ -n \"$c\" ] && notify-send -a macbar 'Color copied' \"$c\""); }
+    function openInFirefox(url) {
+        var u = String(url || "").trim();
+        if (u === "") return;
+        Quickshell.execDetached(["sh", "-c", 'if command -v firefox >/dev/null 2>&1; then nohup firefox "$1" >/dev/null 2>&1 & else nohup xdg-open "$1" >/dev/null 2>&1 & fi', "sh", u]);
+    }
+    function openFolderInTerminal(dir) {
+        var d = String(dir || "").trim();
+        if (d === "") return;
+        Quickshell.execDetached(["sh", "-c", 'cd "$1" && exec ' + root.terminal, "sh", d]);
+    }
+    function refreshDevProjects() {
+        if (!devScanProc.running) devScanProc.running = true;
+    }
+    Process {
+        id: devScanProc
+        running: true
+        command: ["sh", "-c", "dev=\"$HOME/dev\"; [ -d \"$dev\" ] || exit 0; ls -1At \"$dev\" 2>/dev/null | grep -v '^\\.' | head -n 60 | while IFS= read -r n; do p=\"$dev/$n\"; [ -d \"$p\" ] && printf 'D|%s|%s\\n' \"$n\" \"$p\" || printf 'F|%s|%s\\n' \"$n\" \"$p\"; done"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var lines = text.trim().split("\n"), list = [];
+                for (var i = 0; i < lines.length; i++) {
+                    var parts = lines[i].split("|");
+                    if (parts.length < 3) continue;
+                    list.push({ isDir: parts[0] === "D", name: parts[1], path: parts.slice(2).join("|") });
+                }
+                root.devProjects = list;
+            }
+        }
+    }
     Process {
         id: fileSearchProc
-        command: ["sh", "-c", "find \"$HOME\" -type f -iname \"*$1*\" -not -path '*/.cache/*' -not -path '*/.local/share/Trash/*' 2>/dev/null | head -n 8", "sh", root.fileQuery]
+        command: ["sh", "-c", [
+            "q=\"$1\"; [ -n \"$q\" ] || exit 0;",
+            "{ [ -d \"$HOME/dev\" ] && find \"$HOME/dev\" -maxdepth 4 -iname \"*$q*\" \\( -name '.git' -o -name 'node_modules' -o -name 'target' -o -name 'dist' -o -name '.next' \\) -prune -o -iname \"*$q*\" -print 2>/dev/null;",
+            "  find \"$HOME\" -maxdepth 4 \\( -path '*/.cache*' -o -path '*/.local/share/Trash*' -o -path '*/.git*' -o -path '*/node_modules*' -o -path \"$HOME/dev*\" \\) -prune -o -iname \"*$q*\" -print 2>/dev/null; } |",
+            "awk '!seen[$0]++' | head -n 12 | while IFS= read -r p; do [ -d \"$p\" ] && printf 'D|%s\\n' \"$p\" || printf 'F|%s\\n' \"$p\"; done"
+        ].join(" "), "sh", root.fileQuery]
         stdout: StdioCollector { onStreamFinished: {
-            var a=text.trim().split("\n").filter(function(x){return x!=="";});
-            if (root.fileSearchFor === root.fileQuery) { root.fileHits=a; root.fileSearchPending=false; }
+            var lines = text.trim().split("\n"), a = [];
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i] === "") continue;
+                var d = lines[i].indexOf("D|") === 0;
+                var p = (d || lines[i].indexOf("F|") === 0) ? lines[i].substring(2) : lines[i];
+                a.push({ path: p, isDir: d });
+            }
+            if (root.fileSearchFor === root.fileQuery) { root.fileHits = a; root.fileSearchPending = false; }
             else fileDebounce.restart();
         } }
         onExited: if (root.fileSearchFor !== root.fileQuery) fileDebounce.restart()
     }
-    Timer { id: fileDebounce; interval: 260; onTriggered: {
+    Timer { id: fileDebounce; interval: 220; onTriggered: {
         if (root.fileQuery.length > 0 && !fileSearchProc.running) { root.fileSearchFor=root.fileQuery; root.fileSearchPending=true; fileSearchProc.running=true; }
     } }
-    function updateFileSearch(q) { fileQuery=q; fileHits=[]; fileSearchPending=true; fileDebounce.restart(); }
+    function updateFileSearch(q) {
+        q = (q || "").trim();
+        if (q === fileQuery) return;
+        fileQuery = q;
+        if (q === "") { fileHits = []; fileSearchPending = false; fileDebounce.stop(); return; }
+        fileSearchPending = true;
+        fileDebounce.restart();
+    }
 
     // focus / night shift / keep awake
     property bool dnd: false
@@ -2925,6 +3085,7 @@ Scope {
     // ═════════════ MENUS ═════════════
     function mi(label, shortcut, run) { return { kind: "item", label: label, shortcut: shortcut || "", run: run }; }
     function mc(label, run) { return { kind: "item", label: label, shortcut: "", run: run, confirm: true }; }
+    function msub(label, items) { return { kind: "sub", label: label, items: items || [] }; }
     function msep() { return { kind: "sep" }; }
     function ico(item, g) { item.glyph = g; return item; }
     // Hyprland 0.55+ is configured and driven in Lua: `hyprctl dispatch` takes a Lua expression (the old "killactive" style strings fail).
@@ -3014,7 +3175,7 @@ Scope {
         sh("if man -w " + c + " >/dev/null 2>&1; then " + terminal + " -e man " + c + "; else xdg-open 'https://duckduckgo.com/?q=" + q + "'; fi");
     }
     function emoji() {
-        sh("for c in emote bemoji smile rofimoji wofi-emoji; do command -v $c >/dev/null 2>&1 && exec $c; done");
+        sh("for c in emote bemoji smile rofimoji wofi-emoji; do command -v $c >/dev/null 2>&1 && exec $c; done; notify-send -a macbar 'Emoji & Symbols' 'Install emote, bemoji, smile, or rofimoji'");
     }
     function quitActive() {
         var tls = ToplevelManager.toplevels.values;
@@ -3024,12 +3185,105 @@ Scope {
         var e = lookup(activeAppId);
         if (e) e.execute();
     }
+    function recentAppMenuItems() {
+        var usage = appUsage, list = appList, used = [], i;
+        for (i = 0; i < list.length; i++) {
+            var cnt = usage[list[i].id] || 0;
+            if (cnt > 0) used.push({ app: list[i], count: cnt });
+        }
+        used.sort(function (a, b) {
+            return b.count !== a.count ? b.count - a.count : a.app.name.localeCompare(b.app.name);
+        });
+        if (used.length === 0) return [dis(mi("No Recent Applications", "", null), true)];
+        var out = [];
+        for (i = 0; i < used.length && i < 10; i++) out.push(mi(used[i].app.name, "", appRunner(used[i].app)));
+        out.push(msep());
+        out.push(mc("Clear Menu", function () { root.appUsage = ({}); root.saveTimer.restart(); }));
+        return out;
+    }
+    function forceQuitMenuItems() {
+        var out = [], seen = {}, cs = glassClients || [], i;
+        for (i = 0; i < cs.length; i++) {
+            var c = cs[i];
+            if (!c || !c.pid || c.pid <= 0 || seen[c.pid]) continue;
+            seen[c.pid] = true;
+            var entry = lookup(c["class"] || "");
+            var label = entry ? entry.name : (c["class"] || "Application");
+            (function (pidVal, lbl) {
+                out.push(mc(lbl, function () { Quickshell.execDetached(["kill", "-9", String(Math.floor(pidVal))]); }));
+            })(c.pid, label);
+        }
+        if (out.length === 0) {
+            var tls = ToplevelManager.toplevels.values;
+            for (i = 0; i < tls.length; i++) {
+                (function (w) {
+                    var cls = w.appId || "";
+                    if (cls === "" || seen[cls]) return;
+                    seen[cls] = true;
+                    var entry = lookup(cls);
+                    out.push(mc(entry ? entry.name : cls, function () { w.close(); }));
+                })(tls[i]);
+            }
+        }
+        return out.length > 0 ? out : [dis(mi("No Open Applications", "", null), true)];
+    }
+    function tileActiveWindow(aw, preset) {
+        if (!aw) return;
+        var mon = null, i;
+        for (i = 0; i < monData.length; i++) {
+            if (aw.monitor !== undefined ? monData[i].id === aw.monitor : monData[i].focused) { mon = monData[i]; break; }
+        }
+        if (!mon && monData.length > 0) mon = monData[0];
+        if (!mon) {
+            var fm = macWm.focusedMonitor;
+            if (fm) mon = { x: 0, y: 0, width: fm.width || 1920, height: fm.height || 1080 };
+        }
+        if (!mon) return;
+        var pad = 8, topY = mon.y + barHeight + pad;
+        var usW = Math.max(320, mon.width - pad * 2);
+        var usH = Math.max(240, mon.height - barHeight - pad * 2);
+        var hw = Math.floor((usW - pad) / 2), hh = Math.floor((usH - pad) / 2);
+        var x = mon.x + pad, y = topY, w = usW, h = usH;
+        if (preset === "left") { w = hw; }
+        else if (preset === "right") { w = hw; x = mon.x + mon.width - pad - w; }
+        else if (preset === "top") { h = hh; }
+        else if (preset === "bottom") { h = hh; y = mon.y + mon.height - pad - h; }
+        if (!aw.floating) hlx('hl.dsp.window.float({ action = "enable" })');
+        if (preset === "center") { hlx('hl.dsp.window.center()'); return; }
+        hlx('hl.dsp.window.resize({ x = ' + Math.round(w) + ', y = ' + Math.round(h) + ', "exact" })');
+        hlx('hl.dsp.window.move({ x = ' + Math.round(x) + ', y = ' + Math.round(y) + ', "exact" })');
+    }
+    function workspaceMoveItems(aw) {
+        var out = [], ids = root.wsIds || [], curWs = (aw && aw.workspace) ? aw.workspace.id : -1;
+        for (var i = 0; i < ids.length; i++) {
+            (function (wsId) {
+                out.push(mchk(I18n.tr("Workspace ") + wsId, "", curWs === wsId, disp('hl.dsp.window.move({ workspace = "' + wsId + '", follow = false })')));
+            })(ids[i]);
+        }
+        if (out.length > 0) out.push(msep());
+        out.push(mi("Next Workspace", "", disp('hl.dsp.window.move({ workspace = "+1" })')));
+        out.push(mi("Previous Workspace", "", disp('hl.dsp.window.move({ workspace = "-1" })')));
+        return out;
+    }
     // The menu-bar magnifier always opens Ryoku's currently selected app launcher.
     // The standalone Gokko Spotlight launcher opens its own UI through launcherOpenRequested.
     function search() { Quickshell.execDetached(["ryoku-shell", "launcher"]); }
+    property bool spotPendingModeOpen: false
     function spotOpen(mode) {
-        if (!launcherOnly) { search(); return; }
+        if (!launcherOnly) {
+            if (mode === "clip" || mode === "emoji" || mode === "apps" || mode === "files") {
+                Quickshell.execDetached(["qs", "-c", "shell", "ipc", "call", "gokko-spotlight-spotlight-internal", mode]);
+            } else {
+                search();
+            }
+            return;
+        }
         spotWant = mode;
+        if (!launcherOpenRequested) {
+            spotPendingModeOpen = true;
+            launcherOpenModeRequested();
+            spotPendingModeOpen = false;
+        }
         spotRequest++;
     }
     function requestLauncherOpen() { launcherOpenRequested = true; }
@@ -3060,6 +3314,9 @@ Scope {
         function clipboard(): void { root.spotOpen("clip"); }
         function emoji(): void { root.spotOpen("emoji"); }
         function apps(): void { root.spotOpen("apps"); }
+        function files(): void { root.spotOpen("files"); }
+        function openPrefs(pane: string): void { root.openSettings(pane); }
+        function setDark(dark: bool): void { root.setAppearance(dark ? "dark" : "light"); }
     }
 
     // ═════════════ CLIPBOARD HISTORY + EMOJI (Spotlight panels) ═════════════
@@ -3427,69 +3684,288 @@ Scope {
     }
     function actionItems(q) {
         var all = [
-            { title: I18n.tr("Lock Screen"), glyph: "lock", run: function () { root.lockScreen(); } },
-            { title: I18n.tr("Sleep"), glyph: "moon", run: function () { root.sleepMachine(); } },
-            { title: I18n.tr("System Settings\u2026"), glyph: "gear", run: function () { openSettings(); } },
-            { title: I18n.tr("Log Out"), glyph: "logout", confirm: true, run: function () { root.logOut(); } },
-            { title: I18n.tr("Restart"), glyph: "restart", confirm: true, run: function () { SessionActions.run("reboot"); } },
-            { title: I18n.tr("Shut Down"), glyph: "power", confirm: true, run: function () { SessionActions.run("shutdown"); } }
+            { title: root.darkMode ? I18n.tr("Switch to Light Mode") : I18n.tr("Switch to Dark Mode"), kw: "theme appearance dark light mode", sub: I18n.tr("Appearance"), glyph: "contrast", run: function () { root.setAppearance(root.darkMode ? "light" : "dark"); } },
+            { title: root.nightOn ? I18n.tr("Turn Off Night Light") : I18n.tr("Turn On Night Light"), kw: "night shift light warm screen", sub: I18n.tr("Display"), glyph: "nightshift", run: function () { root.setNightLight(!root.nightOn); } },
+            { title: root.dnd ? I18n.tr("Turn Off Do Not Disturb") : I18n.tr("Turn On Do Not Disturb"), kw: "focus dnd notifications mute", sub: I18n.tr("Focus"), glyph: "bell", run: function () { root.toggleDnd(); } },
+            { title: root.keepAwake ? I18n.tr("Turn Off Keep Awake") : I18n.tr("Turn On Keep Awake"), kw: "caffeine sleep inhibit awake", sub: I18n.tr("Power"), glyph: "coffee", run: function () { root.keepAwake = !root.keepAwake; root.saveTimer.restart(); } },
+            { title: root.wifiOn ? I18n.tr("Turn Off Wi-Fi") : I18n.tr("Turn On Wi-Fi"), kw: "network wireless internet wifi", sub: I18n.tr("Network"), glyph: "wifi", run: function () { root.toggleWifi(); } },
+            { title: root.btOn ? I18n.tr("Turn Off Bluetooth") : I18n.tr("Turn On Bluetooth"), kw: "bluetooth devices wireless", sub: I18n.tr("Bluetooth"), glyph: "bluetooth", run: function () { root.toggleBt(); } },
+            { title: root.muted ? I18n.tr("Unmute Audio") : I18n.tr("Mute Audio"), kw: "sound volume speaker mute", sub: I18n.tr("Sound"), glyph: "speaker", run: function () { root.toggleMute(); } },
+            { title: I18n.tr("Energy Mode: Low Power"), kw: "battery power saver profile", sub: I18n.tr("Battery"), glyph: "bolt", run: function () { root.setPowerProfile("power-saver"); } },
+            { title: I18n.tr("Energy Mode: Automatic"), kw: "battery balanced power profile", sub: I18n.tr("Battery"), glyph: "bolt", run: function () { root.setPowerProfile("balanced"); } },
+            { title: I18n.tr("Energy Mode: High Power"), kw: "battery performance power profile", sub: I18n.tr("Battery"), glyph: "bolt", run: function () { root.setPowerProfile("performance"); } },
+            { title: I18n.tr("Clipboard History\u2026"), kw: "copy paste cliphist clipboard", sub: I18n.tr("Spotlight"), glyph: "clipboard", run: function () { root.spotOpen("clip"); } },
+            { title: I18n.tr("Emoji & Symbols\u2026"), kw: "emoji symbols picker", sub: I18n.tr("Spotlight"), glyph: "smile", run: function () { root.spotOpen("emoji"); } },
+            { title: I18n.tr("Search Files in ~/dev\u2026"), kw: "files projects dev folders", sub: I18n.tr("Spotlight"), glyph: "folder", run: function () { ui.spSetMode("files"); } },
+            { title: I18n.tr("Screenshot Selection\u2026"), kw: "capture screen area grim", sub: I18n.tr("Screenshot"), glyph: "photo", run: function () { root.shot("sel"); } },
+            { title: I18n.tr("Screenshot Screen"), kw: "capture screen full", sub: I18n.tr("Screenshot"), glyph: "photo", run: function () { root.shot(""); } },
+            { title: I18n.tr("Pick Color"), kw: "color dropper hex hyprpicker", sub: I18n.tr("Utilities"), glyph: "camera", run: function () { root.pickColor(); } },
+            { title: I18n.tr("Open Terminal"), kw: "shell bash kitty console", sub: I18n.tr("Utilities"), glyph: "layers", run: function () { root.sh(root.terminal); } },
+            { title: I18n.tr("System Settings\u2026"), kw: "preferences settings config", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings(); } },
+            { title: I18n.tr("Appearance Settings\u2026"), kw: "theme wallpaper glass settings", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings("appearance"); } },
+            { title: I18n.tr("Battery Settings\u2026"), kw: "battery power settings", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings("battery"); } },
+            { title: I18n.tr("Sound Settings\u2026"), kw: "audio sound output settings", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings("sound"); } },
+            { title: I18n.tr("Network Settings\u2026"), kw: "wifi network settings", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings("wifi"); } },
+            { title: I18n.tr("Bluetooth Settings\u2026"), kw: "bluetooth settings", sub: I18n.tr("Settings"), glyph: "gear", run: function () { openSettings("bluetooth"); } },
+            { title: I18n.tr("Empty Trash"), kw: "trash delete clean bin", sub: I18n.tr("Finder"), glyph: "folder", confirm: true, run: function () { root.sh("rm -rf \"$HOME/.local/share/Trash/files/\"* \"$HOME/.local/share/Trash/info/\"* 2>/dev/null"); } },
+            { title: I18n.tr("Lock Screen"), kw: "lock screen security", sub: I18n.tr("System"), glyph: "lock", run: function () { root.lockScreen(); } },
+            { title: I18n.tr("Sleep"), kw: "suspend sleep power", sub: I18n.tr("System"), glyph: "moon", run: function () { root.sleepMachine(); } },
+            { title: I18n.tr("Log Out"), kw: "logout exit session", sub: I18n.tr("System"), glyph: "logout", confirm: true, run: function () { root.logOut(); } },
+            { title: I18n.tr("Restart"), kw: "reboot restart", sub: I18n.tr("System"), glyph: "restart", confirm: true, run: function () { SessionActions.run("reboot"); } },
+            { title: I18n.tr("Shut Down"), kw: "poweroff shutdown turn off", sub: I18n.tr("System"), glyph: "power", confirm: true, run: function () { SessionActions.run("shutdown"); } }
         ];
         var s = (q || "").trim().toLowerCase(), out = [];
         for (var i = 0; i < all.length; i++) {
-            if (s !== "" && all[i].title.toLowerCase().indexOf(s) < 0) continue;
-            out.push({ title: all[i].title, sub: I18n.tr("Action"), icon: "", glyph: all[i].glyph,
-                       confirm: all[i].confirm === true, run: all[i].run });
+            var a = all[i], tLow = a.title.toLowerCase();
+            if (s !== "" && tLow.indexOf(s) < 0 && (a.kw || "").indexOf(s) < 0 && a.sub.toLowerCase().indexOf(s) < 0) continue;
+            out.push({
+                title: a.title, sub: a.sub, section: "Actions", previewKind: "action",
+                icon: "", glyph: a.glyph, detail: a.title + " · " + a.sub,
+                confirm: a.confirm === true, run: a.run
+            });
         }
         return out;
     }
     function calcValue(expr) {
-        var t=String(expr || "").replace(/[xX×]/g, "*").replace(/÷/g, "/");
-        if (!/^[0-9+\-*/%.()\s]+$/.test(t) || !/[0-9]/.test(t)) return null;
-        var i=0;
-        function ws(){ while(i<t.length && /\s/.test(t[i])) i++; }
-        function atom(){ ws(); if(t[i]==="+"){i++;return atom();} if(t[i]==="-"){i++;return -atom();} if(t[i]==="("){i++;var v=sum();ws();if(t[i]!==")")throw 0;i++;return v;} var m=t.substring(i).match(/^(?:\d+(?:\.\d*)?|\.\d+)/);if(!m)throw 0;i+=m[0].length;return Number(m[0]); }
-        function term(){ var v=atom(); for(;;){ws();var op=t[i];if(op!=="*"&&op!=="/"&&op!=="%")break;i++;var r=atom();if((op==="/"||op==="%")&&r===0)throw 0;v=op==="*"?v*r:(op==="/"?v/r:v%r);}return v; }
-        function sum(){var v=term();for(;;){ws();var op=t[i];if(op!=="+"&&op!=="-")break;i++;var r=term();v=op==="+"?v+r:v-r;}return v;}
-        try { var v=sum(); ws(); return i===t.length && isFinite(v) ? v : null; } catch(e){ return null; }
+        var raw = String(expr || "").trim();
+        if (raw === "") return null;
+        // Percentages: "20% of 150", "150 + 20%", "150 - 15%"
+        var pctOf = raw.match(/^(-?\d+(?:\.\d+)?)\s*%\s+(?:of|de)\s+(-?\d+(?:\.\d+)?)$/i);
+        if (pctOf) return (Number(pctOf[1]) / 100) * Number(pctOf[2]);
+        var pctRel = raw.match(/^(-?\d+(?:\.\d+)?)\s*([+-])\s*(\d+(?:\.\d+)?)\s*%$/);
+        if (pctRel) {
+            var base = Number(pctRel[1]), p = Number(pctRel[3]) / 100;
+            return pctRel[2] === "+" ? base * (1 + p) : base * (1 - p);
+        }
+        var t = raw.replace(/[xX×]/g, "*").replace(/÷/g, "/").replace(/\^/g, "**");
+        var stripped = t.replace(/\b(?:sqrt|abs|round|floor|ceil|sin|cos|tan|log|ln|pow|min|max|pi|e)\b/gi, "");
+        if (!/^[0-9+\-*/%.,()\s*]+$/.test(stripped) || !/[0-9]/.test(t)) return null;
+        var js = t
+            .replace(/\bpi\b/gi, "Math.PI")
+            .replace(/\be\b/gi, "Math.E")
+            .replace(/\bsqrt\s*\(/gi, "Math.sqrt(")
+            .replace(/\babs\s*\(/gi, "Math.abs(")
+            .replace(/\bround\s*\(/gi, "Math.round(")
+            .replace(/\bfloor\s*\(/gi, "Math.floor(")
+            .replace(/\bceil\s*\(/gi, "Math.ceil(")
+            .replace(/\bsin\s*\(/gi, "Math.sin(")
+            .replace(/\bcos\s*\(/gi, "Math.cos(")
+            .replace(/\btan\s*\(/gi, "Math.tan(")
+            .replace(/\blog\s*\(/gi, "Math.log10(")
+            .replace(/\bln\s*\(/gi, "Math.log(")
+            .replace(/\bpow\s*\(/gi, "Math.pow(")
+            .replace(/\bmin\s*\(/gi, "Math.min(")
+            .replace(/\bmax\s*\(/gi, "Math.max(");
+        try {
+            var fn = new Function("\"use strict\"; return (" + js + ");");
+            var v = fn();
+            return (typeof v === "number" && isFinite(v)) ? v : null;
+        } catch (err) {
+            return null;
+        }
     }
     function conversion(q) {
-        var m=(q||"").trim().match(/^(-?\d+(?:\.\d+)?)\s*([a-z°]+)\s+(?:to|in)\s+([a-z°]+)$/i); if(!m)return null;
-        var val=Number(m[1]), a=m[2].toLowerCase(), b=m[3].toLowerCase();
-        var units={mm:["len",.001],cm:["len",.01],m:["len",1],km:["len",1000],in:["len",.0254],ft:["len",.3048],mi:["len",1609.344],g:["mass",.001],kg:["mass",1],lb:["mass",.45359237],oz:["mass",.0283495],ml:["vol",.001],l:["vol",1],gal:["vol",3.78541],ms:["time",.001],s:["time",1],min:["time",60],h:["time",3600],c:["temp",1],"°c":["temp",1],f:["temp",1],"°f":["temp",1]};
-        if(!units[a]||!units[b]||units[a][0]!==units[b][0])return null;
+        var m = (q || "").trim().match(/^(-?\d+(?:\.\d+)?)\s*([a-z0-9°/]+)\s+(?:to|in|a|en)\s+([a-z0-9°/]+)$/i);
+        if (!m) return null;
+        var val = Number(m[1]), a = m[2].toLowerCase(), b = m[3].toLowerCase();
+        var units = {
+            mm:["len",0.001], cm:["len",0.01], m:["len",1], km:["len",1000], "in":["len",0.0254], ft:["len",0.3048], mi:["len",1609.344],
+            mg:["mass",0.000001], g:["mass",0.001], kg:["mass",1], lb:["mass",0.45359237], oz:["mass",0.0283495],
+            ml:["vol",0.001], l:["vol",1], gal:["vol",3.78541],
+            ms:["time",0.001], s:["time",1], min:["time",60], h:["time",3600], d:["time",86400], day:["time",86400],
+            b:["data",1], kb:["data",1000], mb:["data",1e6], gb:["data",1e9], tb:["data",1e12],
+            kib:["data",1024], mib:["data",1048576], gib:["data",1073741824], tib:["data",1099511627776],
+            "m/s":["spd",1], "km/h":["spd",1/3.6], kmh:["spd",1/3.6], mph:["spd",0.44704],
+            deg:["ang",1], rad:["ang",180/Math.PI],
+            c:["temp",1], "°c":["temp",1], f:["temp",1], "°f":["temp",1], k:["temp",1]
+        };
+        if (!units[a] || !units[b] || units[a][0] !== units[b][0]) return null;
         var result;
-        if(units[a][0]==="temp") result=(a==="f"||a==="°f")?(val-32)*5/9:val, result=(b==="f"||b==="°f")?result*9/5+32:result;
-        else result=val*units[a][1]/units[b][1];
-        return {title:Number(result.toPrecision(7))+" "+b,sub:I18n.tr("Unit conversion"),glyph:"link",run:function(){Quickshell.execDetached(["wl-copy",String(result)]);}};
+        if (units[a][0] === "temp") {
+            var cel = (a === "f" || a === "°f") ? (val - 32) * 5 / 9 : (a === "k" ? val - 273.15 : val);
+            result = (b === "f" || b === "°f") ? cel * 9 / 5 + 32 : (b === "k" ? cel + 273.15 : cel);
+        } else {
+            result = val * units[a][1] / units[b][1];
+        }
+        var resStr = String(Number(result.toPrecision(8)));
+        return {
+            title: resStr + " " + b, sub: I18n.tr("Conversion"), section: "Calculator",
+            previewKind: "calc", formula: q.trim(), answer: resStr + " " + b,
+            glyph: "link",
+            run: function () { Quickshell.execDetached(["wl-copy", resStr]); }
+        };
     }
     function windowItems(q) {
-        var out=[], s=(q||"").trim().toLowerCase(); if(!s)return out;
-        var ts=macWm.toplevels.values;
-        for(var i=0;i<ts.length&&out.length<4;i++){
-            var t=ts[i], o=t.lastIpcObject||{}, title=String(o.title||t.title||""), cls=String(o["class"]||t.appId||""), app=root.lookup(cls), label=title||app&&app.name||cls;
-            if((label+" "+cls+" "+(app?app.name:" ")).toLowerCase().indexOf(s)<0)continue;
-            var addr=String(o.address||t.address||""); if(addr!=="" && addr.indexOf("0x")!==0) addr="0x"+addr;
-            (function(win,addr,workspace,cl,name,icon){out.push({title:name,sub:I18n.tr("Open Window"),icon:icon||"",glyph:"layers",run:function(){root.swPending={addr:addr,ws:workspace,cls:cl};swFocusTimer.restart();}});})(t,addr,o.workspace&&o.workspace.id>0?o.workspace.id:0,cls,label,app?root.iconSrc(app.icon):"");
+        var out = [], s = (q || "").trim().toLowerCase(); if (!s) return out;
+        var ts = macWm.toplevels.values;
+        for (var i = 0; i < ts.length && out.length < 4; i++) {
+            var t = ts[i], o = t.lastIpcObject || {}, title = String(o.title || t.title || ""), cls = String(o["class"] || t.appId || ""), app = root.lookup(cls), label = title || app && app.name || cls;
+            if ((label + " " + cls + " " + (app ? app.name : " ")).toLowerCase().indexOf(s) < 0) continue;
+            var addr = String(o.address || t.address || ""); if (addr !== "" && addr.indexOf("0x") !== 0) addr = "0x" + addr;
+            var wsNum = o.workspace && o.workspace.id > 0 ? o.workspace.id : 0;
+            (function (win, addr, workspace, cl, name, icon, appLabel) {
+                out.push({
+                    title: name, sub: workspace > 0 ? (I18n.tr("Workspace ") + workspace) : I18n.tr("Open Window"),
+                    section: "Open Windows", previewKind: "window",
+                    detail: (appLabel || cl) + (workspace > 0 ? " · Workspace " + workspace : ""),
+                    icon: icon || "", glyph: "layers",
+                    run: function () { root.swPending = { addr: addr, ws: workspace, cls: cl }; swFocusTimer.restart(); }
+                });
+            })(t, addr, wsNum, cls, label, app ? root.iconSrc(app.icon) : "", app ? app.name : "");
         }
         return out;
     }
-    function fileItems(q) {
-        var out=[]; for(var i=0;i<fileHits.length&&out.length<5;i++){var path=fileHits[i];out.push({title:path.substring(path.lastIndexOf("/")+1)||path,sub:path,glyph:"folder",run:(function(p){return function(){Quickshell.execDetached(["xdg-open",p]);};})(path)});} return out;
+    function makePathResult(p, isDir, section) {
+        var name = p.substring(p.lastIndexOf("/") + 1) || p;
+        var home = Quickshell.env("HOME") || "";
+        var shortPath = (home !== "" && p.indexOf(home) === 0) ? ("~" + p.substring(home.length)) : p;
+        var item = {
+            title: name,
+            sub: shortPath,
+            section: section || "Files",
+            previewKind: isDir ? "project" : "file",
+            path: shortPath,
+            fullPath: p,
+            isDir: isDir === true,
+            glyph: isDir ? "folder" : "doc",
+            run: function () { Quickshell.execDetached(["xdg-open", p]); }
+        };
+        if (isDir) {
+            item.altLabel = I18n.tr("Terminal");
+            item.altRun = function () { root.openFolderInTerminal(p); };
+        }
+        return item;
+    }
+    function devProjectItems(q, limit) {
+        var s = (q || "").trim().toLowerCase(), hits = [], out = [], i;
+        for (i = 0; i < devProjects.length; i++) {
+            var d = devProjects[i], n = d.name.toLowerCase(), sc = 0;
+            if (s === "") sc = 100 - i;
+            else if (n === s) sc = 100;
+            else if (n.indexOf(s) === 0) sc = 80;
+            else if (n.indexOf(s) >= 0) sc = 50;
+            if (sc > 0) hits.push({ d: d, sc: sc });
+        }
+        if (s !== "") hits.sort(function (a, b) { return b.sc - a.sc; });
+        for (i = 0; i < hits.length && out.length < (limit || 6); i++)
+            out.push(makePathResult(hits[i].d.path, hits[i].d.isDir, "Projects in ~/dev"));
+        return out;
+    }
+    function fileItems(limit) {
+        var out = [], seen = {};
+        for (var i = 0; i < fileHits.length && out.length < (limit || 6); i++) {
+            var h = fileHits[i], p = (typeof h === "string") ? h : h.path, isDir = (typeof h === "object") ? h.isDir === true : false;
+            if (!p || seen[p]) continue;
+            seen[p] = true;
+            out.push(makePathResult(p, isDir, "Files"));
+        }
+        return out;
+    }
+    function filesModeItems(q) {
+        var out = [], devs = devProjectItems(q, 8), seen = {};
+        for (var i = 0; i < devs.length; i++) { out.push(devs[i]); seen[devs[i].fullPath] = true; }
+        var s = (q || "").trim();
+        if (s !== "") {
+            var f = fileItems(10);
+            for (var j = 0; j < f.length; j++) {
+                if (!seen[f[j].fullPath]) { out.push(f[j]); seen[f[j].fullPath] = true; }
+            }
+            if (out.length === 0)
+                out.push({ title: fileSearchPending ? I18n.tr("Searching files\u2026") : I18n.tr("No matching files"), sub: "~/dev & Home", section: "Files", previewKind: "file", glyph: "folder", run: function () {} });
+        }
+        return out.slice(0, 14);
     }
     function homeItems(q) {
-        var out = [], s = (q || "").trim().toLowerCase();
-        if (s.indexOf("file ") === 0 || s.indexOf("find ") === 0) {
-            var fq=s.replace(/^(file|find)\s+/,"").trim(); if(fq!=="" && fileQuery!==fq) updateFileSearch(fq);
-            out=fileItems(fq); if(out.length===0) out.push({title:fileSearchPending?I18n.tr("Searching files…"):I18n.tr("No matching files"),sub:I18n.tr("Files"),glyph:"folder",run:function(){}});
+        var raw = String(q || "").trim(), s = raw.toLowerCase(), out = [];
+        // Empty query: macOS-style Suggestions (frequent apps + ~/dev projects + quick actions)
+        if (raw === "") {
+            var list = appList, usage = appUsage, used = [], i;
+            for (i = 0; i < list.length; i++) if ((usage[list[i].id] || 0) > 0) used.push(list[i]);
+            used.sort(function (a, b) { return (usage[b.id] || 0) - (usage[a.id] || 0); });
+            if (used.length === 0) used = list.slice(0, 3);
+            for (i = 0; i < used.length && i < 3; i++) {
+                out.push({
+                    title: used[i].name, sub: used[i].genericName || I18n.tr("Application"),
+                    section: "Suggestions", previewKind: "app",
+                    detail: used[i].comment || used[i].genericName || I18n.tr("Application"),
+                    icon: iconSrc(used[i].icon), glyph: "", confirm: false, run: appRunner(used[i])
+                });
+            }
+            var devs = devProjectItems("", 4);
+            for (i = 0; i < devs.length; i++) out.push(devs[i]);
+            var acts = actionItems("");
+            for (i = 0; i < acts.length && i < 2; i++) { acts[i].section = "Quick Actions"; out.push(acts[i]); }
             return out;
         }
-        if(s.length>0) out=appItems(q,4);
-        var cv=conversion(s); if(cv) out.unshift(cv);
-        else { var expr=s.replace(/^=\s*/,""); var v=calcValue(expr); if(v!==null && (s.charAt(0)==="=" || /[+*/%xX×÷()]/.test(s))) out.unshift({title:String(Number(v.toPrecision(10))),sub:I18n.tr("Calculator · Return to copy"),glyph:"search",run:function(){Quickshell.execDetached(["wl-copy",String(v)]);}}); }
-        var wins=windowItems(q); for(var j=0;j<wins.length&&out.length<6;j++)out.push(wins[j]);
-        var acts=actionItems(q); for(var k=0;k<acts.length&&out.length<6;k++)if(acts[k].title.toLowerCase().indexOf(s)===0)out.push(acts[k]);
-        if(s.length>0 && out.length<7) out.push({title:I18n.tr("Search the web for “")+q.trim()+"”",sub:I18n.tr("Web Search · Return to open"),glyph:"search",run:function(){Quickshell.execDetached(["xdg-open","https://search.brave.com/search?q="+encodeURIComponent(q.trim())]);}});
-        return out.slice(0,8);
+        // Explicit "file " / "find " prefix: pure file + ~/dev mode
+        if (s.indexOf("file ") === 0 || s.indexOf("find ") === 0) {
+            var fq = s.replace(/^(file|find)\s+/, "").trim();
+            if (fq !== "" && fileQuery !== fq) updateFileSearch(fq);
+            out = filesModeItems(fq);
+            return out;
+        }
+        // Calculator / Unit Conversion
+        var cv = conversion(raw);
+        if (cv) out.push(cv);
+        else {
+            var expr = raw.replace(/^=\s*/, "");
+            var v = calcValue(expr);
+            if (v !== null && (raw.charAt(0) === "=" || /[+*/%xX×÷^()]/.test(raw) || /\b(?:of|de|sqrt|sin|cos|tan|log|ln)\b/i.test(raw))) {
+                var ans = String(Number(v.toPrecision(10)));
+                out.push({
+                    title: ans, sub: raw, section: "Calculator",
+                    previewKind: "calc", formula: raw, answer: ans, glyph: "search",
+                    run: function () { Quickshell.execDetached(["wl-copy", ans]); }
+                });
+            }
+        }
+        // Direct URL detection -> Open in Firefox
+        if (/^(?:https?:\/\/|localhost:\d+|[a-z0-9-]+(?:\.[a-z0-9-]+)+\b)/i.test(raw) && !/\s/.test(raw) && raw.indexOf("..") < 0) {
+            var targetUrl = /^https?:\/\//i.test(raw) ? raw : ("http" + (raw.indexOf("localhost") === 0 ? "" : "s") + "://" + raw);
+            out.push({
+                title: I18n.tr("Open ") + raw, sub: I18n.tr("Open URL in Firefox"),
+                section: "Web", previewKind: "web", detail: targetUrl, glyph: "link",
+                run: function () { root.openInFirefox(targetUrl); }
+            });
+        }
+        // Applications
+        var apps = searchApps(raw);
+        for (i = 0; i < apps.length && i < 4; i++) {
+            out.push({
+                title: apps[i].name, sub: apps[i].genericName || I18n.tr("Application"),
+                section: "Applications", previewKind: "app",
+                detail: apps[i].comment || apps[i].genericName || I18n.tr("Application"),
+                icon: iconSrc(apps[i].icon), glyph: "", confirm: false, run: appRunner(apps[i])
+            });
+        }
+        // ~/dev Projects (instant)
+        var devHits = devProjectItems(raw, 4);
+        for (i = 0; i < devHits.length; i++) out.push(devHits[i]);
+        // Deep file matches (while already populated)
+        var seenPaths = {};
+        for (i = 0; i < devHits.length; i++) seenPaths[devHits[i].fullPath] = true;
+        var fHits = fileItems(4);
+        for (i = 0; i < fHits.length; i++) if (!seenPaths[fHits[i].fullPath]) out.push(fHits[i]);
+        // Open Windows
+        var wins = windowItems(raw);
+        for (i = 0; i < wins.length; i++) out.push(wins[i]);
+        // Actions
+        var actionHits = actionItems(raw);
+        for (i = 0; i < actionHits.length && i < 4; i++) out.push(actionHits[i]);
+        // Top Hit promotion
+        if (out.length > 0 && out[0].section !== "Calculator" && out[0].section !== "Web") {
+            var firstLow = out[0].title.toLowerCase();
+            if (firstLow === s || firstLow.indexOf(s) === 0) out[0].section = "Top Hit";
+        }
+        // Firefox Google Search fallback
+        out.push({
+            title: I18n.tr("Search Google for \u201c") + raw + "\u201d",
+            sub: I18n.tr("Firefox"), section: "Web", previewKind: "web",
+            detail: "https://www.google.com/search?q=" + encodeURIComponent(raw),
+            glyph: "search",
+            run: function () { root.openInFirefox("https://www.google.com/search?q=" + encodeURIComponent(raw)); }
+        });
+        return out.slice(0, 14);
     }
 
     function menuModelFor(name) {
@@ -3501,6 +3977,9 @@ Scope {
             }), "m_about"));
             m.push(msep());
             m.push(ico(mi("System Settings\u2026", "", function () { root.openSettings(); }), "gear"));
+            m.push(msub("Recent Items", recentAppMenuItems()));
+            m.push(msep());
+            m.push(msub("Force Quit\u2026", forceQuitMenuItems()));
             m.push(msep());
             m.push(ico(mi("Sleep", "", function () { root.sleepMachine(); }), "moon"));
             m.push(ico(mc("Restart\u2026", function () { SessionActions.run("reboot"); }), "m_restart"));
@@ -3582,6 +4061,8 @@ Scope {
                     m.push(mi("Find\u2026", "Ctrl+F", keys(["ctrl"], "f")));
                 }
                 if (has) m.push(msep());
+                m.push(ico(mi("Clipboard History\u2026", "", function () { root.spotOpen("clip"); }), "clipboard"));
+                m.push(ico(mi("Emoji & Symbols\u2026", "", function () { root.spotOpen("emoji"); }), "smile"));
             } else if (name === "view") {
                 if (has) {
                     m.push(mi(fsMode === 2 ? "Exit Full Screen" : "Enter Full Screen", "", disp('hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" })')));
@@ -3612,14 +4093,22 @@ Scope {
                     m.push(mi("Minimize", "", disp('hl.dsp.window.move({ workspace = "special:minimized", follow = false })')));
                     m.push(mchk("Zoom", "", fsMode === 1, disp('hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" })')));
                     m.push(mi(floating ? "Tile Window" : "Float Window", "", disp('hl.dsp.window.float({ action = "toggle" })')));
+                    m.push(msub("Move & Resize", [
+                        mi("Left Half", "", function () { root.tileActiveWindow(aw, "left"); }),
+                        mi("Right Half", "", function () { root.tileActiveWindow(aw, "right"); }),
+                        mi("Top Half", "", function () { root.tileActiveWindow(aw, "top"); }),
+                        mi("Bottom Half", "", function () { root.tileActiveWindow(aw, "bottom"); }),
+                        msep(),
+                        mi("Fill", "", function () { root.tileActiveWindow(aw, "fill"); }),
+                        mi("Center", "", function () { root.tileActiveWindow(aw, "center"); })
+                    ]));
                     m.push(msep());
                     m.push(mi("Move Window Left", "", disp('hl.dsp.window.move({ direction = "left" })')));
                     m.push(mi("Move Window Right", "", disp('hl.dsp.window.move({ direction = "right" })')));
                     m.push(mi("Make Wider", "", disp('hl.dsp.window.resize({ x = 100, y = 0, relative = true })')));
                     m.push(mi("Make Narrower", "", disp('hl.dsp.window.resize({ x = -100, y = 0, relative = true })')));
                     if (Quickshell.screens.length > 1) m.push(mi("Move to Next Monitor", "", disp('hl.dsp.window.move({ monitor = "+1" })')));
-                    m.push(mi("Move to Next Workspace", "", disp('hl.dsp.window.move({ workspace = "+1" })')));
-                    m.push(mi("Move to Previous Workspace", "", disp('hl.dsp.window.move({ workspace = "-1" })')));
+                    m.push(msub("Move to Workspace", workspaceMoveItems(aw)));
                     m.push(msep());
                 }
                 m.push(mi("Show Hidden Windows", "", disp('hl.dsp.workspace.toggle_special("hidden")')));
@@ -4993,9 +5482,22 @@ Scope {
                         : Qt.rgba(1, 1, 1, root.barBgOpacity)
                 }
 
-                property string pop: ""          // "", apple, app, file, edit, view, window, help, cc, cal
+                property string pop: ""          // "", apple, app, file, edit, view, window, help, cc, cal, bat
                 property real menuX: 0
                 property var menuModel: []
+                property var subMenuModel: []
+                property string subMenuLabel: ""
+                property real subMenuRowY: 0
+                Timer {
+                    id: subCloseT
+                    interval: 130
+                    onTriggered: {
+                        if (!subPopHover.containsMouse) {
+                            ui.subMenuModel = [];
+                            ui.subMenuLabel = "";
+                        }
+                    }
+                }
                 property string armed: ""
                 property int calYear: 2026
                 property int calMonth: 0
@@ -5011,6 +5513,7 @@ Scope {
                 property string ccPage: ""          // "" = the control grid, "wifi" = the Wi-Fi list shown inside the Control Center
                 onCcPageChanged: { wifiPrompt = ""; ccMenuOpen = false; }
                 Timer { interval: 400; repeat: true; running: ui.pop === "vol"; onTriggered: root.audioTick++ }
+                Timer { interval: 1800; repeat: true; running: ui.pop === "bat"; onTriggered: root.refreshBatteryTelemetry() }
                 readonly property bool toastScreen: root.launcherOnly && root.launcherMonitor !== ""
                     ? barGeo.sname === root.launcherMonitor
                     : (Quickshell.screens.length === 1 || (macWm.focusedMonitor !== null && macWm.focusedMonitor.name === barGeo.sname))
@@ -5050,13 +5553,13 @@ Scope {
                 }
 
                 // Spotlight state
-                property string spMode: "home"          // home | actions | apps
+                property string spMode: "home"          // home | actions | files | apps | clip | emoji
                 property string spQuery: ""
                 // TextInput changes instantly; only the result model is coalesced.
                 property string spPaintQuery: ""
                 Timer {
                     id: spResultDebounce
-                    interval: 65
+                    interval: 55
                     repeat: false
                     onTriggered: ui.spPaintQuery = ui.spQuery
                 }
@@ -5080,9 +5583,10 @@ Scope {
                 readonly property int emCols: 12
                 readonly property bool spFull: spMode === "apps" || spMode === "clip" || spMode === "emoji"
                 property var spResults: spMode === "actions" ? root.actionItems(spPaintQuery)
+                                        : (spMode === "files" ? root.filesModeItems(spPaintQuery)
                                         : (spMode === "clip" ? root.clipFiltered(spQuery)
                                         : (spMode === "emoji" ? root.emojiItems(spQuery, emCat)
-                                        : (spPaintQuery.trim() === "" ? [] : spHomeItemsMeasured(spPaintQuery))))
+                                        : spHomeItemsMeasured(spPaintQuery))))
 
                 function spSetMode(m) {
                     spMode = m; spQuery = ""; spPaintQuery = ""; spResultDebounce.stop(); spHoverLabel = ""; spSel = 0; armed = ""; clipMenu = false;
@@ -5129,8 +5633,14 @@ Scope {
                         if (spQuery.trim() === "") { emCat = (emCat + (k === Qt.Key_Tab ? 1 : 9)) % 10; spSel = 0; }
                         ev.accepted = true;
                     }
-                    else if (k === Qt.Key_Down) { spMove(1); ev.accepted = true; }
-                    else if (k === Qt.Key_Up) { spMove(-1); ev.accepted = true; }
+                    else if (!spFull && (k === Qt.Key_Tab || k === Qt.Key_Backtab)) {
+                        var modes = ["home", "files", "actions"];
+                        var idx = Math.max(0, modes.indexOf(spMode));
+                        spSetMode(modes[(idx + (k === Qt.Key_Tab ? 1 : modes.length - 1)) % modes.length]);
+                        ev.accepted = true;
+                    }
+                    else if (k === Qt.Key_Down) { spHover = false; spMove(1); ev.accepted = true; }
+                    else if (k === Qt.Key_Up) { spHover = false; spMove(-1); ev.accepted = true; }
                     else if (spMode === "clip" && k === Qt.Key_Delete) {
                         if (n > 0) root.clipDelete(spResults[Math.min(spSel, n - 1)]);
                         ev.accepted = true;
@@ -5140,6 +5650,10 @@ Scope {
                             var it = spResults[Math.min(spSel, n - 1)];
                             pop = "";
                             root.clipPick(it, false);       // Shift+Return: copy only, don't paste
+                        } else if (!spFull && (ev.modifiers & Qt.ShiftModifier) && n > 0) {
+                            var curIt = spResults[Math.min(spSel, n - 1)];
+                            if (curIt && curIt.altRun) { pop = ""; curIt.altRun(); }
+                            else spEnter();
                         } else spEnter();
                         ev.accepted = true;
                     }
@@ -5155,13 +5669,23 @@ Scope {
                     for (var i = 0; i < menuModel.length; i++) if (menuModel[i].checked !== undefined || menuModel[i].glyph !== undefined) return true;
                     return false;
                 }
+                readonly property bool subMenuLead: {
+                    for (var i = 0; i < subMenuModel.length; i++) if (subMenuModel[i].checked !== undefined || subMenuModel[i].glyph !== undefined) return true;
+                    return false;
+                }
                 Connections {
                     target: root
-                    function onActiveWinChanged() { if (ui.isMenu) ui.menuModel = root.menuModelFor(ui.pop); }
+                    function onActiveWinChanged() {
+                        if (ui.isMenu) {
+                            ui.menuModel = root.menuModelFor(ui.pop);
+                            ui.subMenuModel = [];
+                            ui.subMenuLabel = "";
+                        }
+                    }
                 }
                 // bounding box of all glass that is on screen right now (popovers, notification popups) + a refraction margin
                 readonly property rect glassRect: {
-                    var items = [menuPop, cc, cal, wifiPop, btPop, notifPop, toastArea, volPop, kbPop, levelOsd], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
+                    var items = [menuPop, subMenuPop, cc, cal, wifiPop, btPop, batPop, notifPop, toastArea, volPop, kbPop, levelOsd], x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, any = false;
                     for (var i = 0; i < items.length; i++) {
                         var it = items[i];
                         if (!it.visible) continue;
@@ -5171,7 +5695,7 @@ Scope {
                     return any ? Qt.rect(x0 - 64, y0 - 64, x1 - x0 + 128, y1 - y0 + 128) : Qt.rect(0, 0, 0, 0);
                 }
                 readonly property bool isMenu: ["apple", "app", "file", "edit", "view", "window", "help"].indexOf(pop) >= 0
-                readonly property bool anyVisible: menuPop.visible || cc.visible || cal.visible || wifiPop.visible || btPop.visible || notifPop.visible || toastArea.visible || volPop.visible || kbPop.visible
+                readonly property bool anyVisible: menuPop.visible || subMenuPop.visible || cc.visible || cal.visible || wifiPop.visible || btPop.visible || batPop.visible || notifPop.visible || toastArea.visible || volPop.visible || kbPop.visible
                 onAnyVisibleChanged: root.popCount += (anyVisible ? 1 : -1)
                 onPopChanged: {
                     if (root.launcherOnly && launcherSpotWasOpen && pop !== "spot") {
@@ -5182,6 +5706,8 @@ Scope {
                     if (pop !== "" && pop !== "spot") toneT.restart();
                     if (pop === "spot" && ui.toastScreen) root.measureTone(barGeo.sx + ui.width / 2 - 320, barGeo.sy + ui.height * 0.4 - 30, 640, 60);
                     armed = "";
+                    subCloseT.stop();
+                    if (!isMenu) { subMenuModel = []; subMenuLabel = ""; }
                     wifiPrompt = "";
                     spHoverLabel = "";
                     if (pop !== "cc") { ccEdit = false; ccMenuOpen = false; }
@@ -5190,9 +5716,12 @@ Scope {
                     if (root.notifOpen) root.notifUnread = 0;
                     if (pop === "wifi") { root.wifiError = ""; root.scanWifi(); root.refreshConnections(); }
                     if (pop === "bt") { root.btError = ""; root.scanBt(); root.refreshBt(); }
+                    if (pop === "bat") { root.refreshPowerProfile(); root.refreshBatteryTelemetry(); }
                     if (pop === "spot") {
                         spMode = "home"; spQuery = ""; spPaintQuery = ""; spResultDebounce.stop(); spSel = 0; spExpanded = ({}); clipMenu = false;
                         spInput.text = ""; appsInput.text = ""; clipInput.text = ""; emojiInput.text = "";
+                        root.refreshDevProjects();
+                        root.updateFileSearch("");
                         spFocusTimer.restart();
                     }
                 }
@@ -5202,6 +5731,7 @@ Scope {
                         if (ui.pop === "spot") ui.pop = "";
                         return;
                     }
+                    if (root.spotPendingModeOpen) return;
                     if (root.launcherOpenRequested) {
                         if (ui.pop !== "spot") {
                             root.spotWant = "home";
@@ -5246,8 +5776,13 @@ Scope {
                     if (pop === name) { pop = ""; return; }
                     if (name === "spot") { spCalm = spReqCalm; spReqCalm = false; }
                     menuX = x;
-                    if (["apple", "app", "file", "edit", "view", "window", "help"].indexOf(name) >= 0) root.refreshActive();
-                    if (["apple", "app", "file", "edit", "view", "window", "help"].indexOf(name) >= 0) menuModel = root.menuModelFor(name);
+                    if (["apple", "app", "file", "edit", "view", "window", "help"].indexOf(name) >= 0) {
+                        root.refreshActive();
+                        menuModel = root.menuModelFor(name);
+                        subMenuModel = [];
+                        subMenuLabel = "";
+                        subCloseT.stop();
+                    }
                     if (name === "cal") { var d = new Date(); calYear = d.getFullYear(); calMonth = d.getMonth(); }
                     pop = name;
                 }
@@ -5255,6 +5790,9 @@ Scope {
                     if (!isMenu || name === pop) return;
                     menuX = x;
                     menuModel = root.menuModelFor(name);
+                    subMenuModel = [];
+                    subMenuLabel = "";
+                    subCloseT.stop();
                     pop = name;
                 }
                 function calCells() {
@@ -6018,8 +6556,14 @@ Scope {
                         }
                         // battery
                         Item {
+                            id: batBtn
                             visible: root.hasBattery
                             width: root.hasBattery ? batRow.width + 14 : 0; height: 28
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: parent.width - 2; height: parent.height - 6; radius: 6
+                                color: ui.pop === "bat" ? bpal.hover : "transparent"
+                            }
                             Row {
                                 id: batRow
                                 anchors.centerIn: parent
@@ -6058,7 +6602,10 @@ Scope {
                                     }
                                 }
                             }
-                            MouseArea { anchors.fill: parent; onClicked: ui.openPop("cc", 0) }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: ui.openPop("bat", batBtn.mapToItem(ui, 0, 0).x + batBtn.width / 2)
+                            }
                         }
                         // notification system (bell)
                         Item {
@@ -6859,10 +7406,122 @@ Scope {
                 }
 
                 // ═════════ dropdown menu (Apple / app / File / Edit / …) ═════════
+                component MenuRowItem: Item {
+                    id: it
+                    required property var modelData
+                    property bool lead: false
+                    property bool allowSub: true
+                    readonly property bool isSep: modelData.kind === "sep"
+                    readonly property bool isSub: allowSub && modelData.kind === "sub"
+                    readonly property bool subOpen: isSub && ui.subMenuLabel === modelData.label && ui.subMenuModel.length > 0
+                    readonly property bool armedNow: !isSep && !isSub && modelData.confirm === true && ui.armed === modelData.label
+                    readonly property bool off: !isSep && modelData.disabled === true
+                    readonly property bool hot: !isSep && !off && (ima.containsMouse || subOpen)
+                    width: parent ? parent.width : 240
+                    height: isSep ? 11 : 26
+
+                    Rectangle {
+                        visible: it.isSep
+                        anchors.verticalCenter: parent.verticalCenter
+                        x: 8; width: parent.width - 16; height: 1
+                        color: panelPal.sep
+                    }
+                    Rectangle {
+                        visible: it.hot
+                        anchors.fill: parent
+                        radius: 6
+                        color: it.armedNow ? "#FF453A" : (it.subOpen && !ima.containsMouse ? panelPal.hover : root.accent)
+                    }
+                    Glyph {
+                        visible: !it.isSep && it.modelData.glyph !== undefined
+                        x: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 15; height: 15
+                        kind: it.modelData.glyph !== undefined ? it.modelData.glyph : ""
+                        color: (it.hot && !(it.subOpen && !ima.containsMouse)) ? "white" : (it.off ? panelPal.fg2 : panelPal.fg)
+                    }
+                    Text {
+                        visible: !it.isSep && it.modelData.checked === true
+                        x: 11
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u2713"
+                        color: (it.hot && !(it.subOpen && !ima.containsMouse)) ? "white" : panelPal.fg
+                        font.family: Fonts.forWeight(Font.Normal, "Open Runde")
+                        font.pixelSize: 13
+                        font.weight: Font.Normal
+                    }
+                    Text {
+                        visible: !it.isSep
+                        x: it.lead ? 28 : 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width - x - 12 - (it.isSub ? 20 : (sc.visible ? sc.implicitWidth + 12 : 0))
+                        elide: Text.ElideRight
+                        text: it.isSep ? "" : (it.armedNow ? I18n.tr("Click again to confirm") : I18n.tr(it.modelData.label))
+                        color: (it.hot && !(it.subOpen && !ima.containsMouse)) ? "white" : (it.off ? panelPal.fg2 : panelPal.fg)
+                        font.family: Fonts.forWeight(Font.Normal, "Open Runde")
+                        font.pixelSize: 13
+                        font.weight: Font.Normal
+                    }
+                    Text {
+                        id: sc
+                        visible: !it.isSep && !it.isSub && it.modelData.shortcut !== undefined && it.modelData.shortcut !== ""
+                        anchors.right: parent.right
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: it.isSep ? "" : (it.modelData.shortcut || "")
+                        color: it.hot ? Qt.rgba(1, 1, 1, 0.8) : panelPal.fg2
+                        font.family: Fonts.forWeight(Font.Normal, "Open Runde")
+                        font.pixelSize: 12
+                        font.weight: Font.Normal
+                    }
+                    Glyph {
+                        visible: it.isSub
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 11; height: 11
+                        kind: "chevR"
+                        color: (it.hot && !(it.subOpen && !ima.containsMouse)) ? "white" : panelPal.fg2
+                    }
+                    MouseArea {
+                        id: ima
+                        anchors.fill: parent
+                        enabled: !it.isSep && !it.off
+                        hoverEnabled: true
+                        onEntered: {
+                            if (!it.allowSub) { subCloseT.stop(); return; }
+                            if (it.isSub) {
+                                subCloseT.stop();
+                                ui.subMenuModel = it.modelData.items || [];
+                                ui.subMenuLabel = it.modelData.label;
+                                ui.subMenuRowY = it.y;
+                            } else if (ui.subMenuModel.length > 0) {
+                                subCloseT.restart();
+                            }
+                        }
+                        onClicked: {
+                            if (it.isSub) {
+                                subCloseT.stop();
+                                ui.subMenuModel = it.modelData.items || [];
+                                ui.subMenuLabel = it.modelData.label;
+                                ui.subMenuRowY = it.y;
+                                return;
+                            }
+                            if (it.modelData.confirm === true && ui.armed !== it.modelData.label) {
+                                ui.armed = it.modelData.label;
+                                return;
+                            }
+                            var run = it.modelData.run;
+                            ui.pop = "";
+                            if (run) run();
+                        }
+                    }
+                }
+
                 Item {
                     id: menuPop
                     z: 10
-                    width: 260
+                    width: 268
                     height: menuCol.height + 14
                     x: Math.max(6, Math.min(ui.width - width * root.barPopupScale - 6, ui.menuX - 4))
                     y: root.barHeight + 3
@@ -6908,83 +7567,416 @@ Scope {
                         width: parent.width - 12
                         Repeater {
                             model: ui.menuModel
-                            delegate: Item {
-                                id: it
-                                required property var modelData
-                                readonly property bool isSep: modelData.kind === "sep"
-                                readonly property bool armedNow: !isSep && modelData.confirm === true && ui.armed === modelData.label
-                                readonly property bool off: !isSep && modelData.disabled === true
-                                readonly property bool hot: !isSep && !off && ima.containsMouse
-                                width: menuCol.width
-                                height: isSep ? 11 : 26
+                            delegate: MenuRowItem { lead: ui.menuLead; allowSub: true }
+                        }
+                    }
+                }
 
-                                Rectangle {
-                                    visible: it.isSep
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    x: 8; width: parent.width - 16; height: 1
-                                    color: panelPal.sep
-                                }
-                                Rectangle {
-                                    visible: it.hot
-                                    anchors.fill: parent
-                                    radius: 6
-                                    color: it.armedNow ? "#FF453A" : root.accent
-                                }
-                                Glyph {
-                                    visible: !it.isSep && it.modelData.glyph !== undefined
-                                    x: 10
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 15; height: 15
-                                    kind: it.modelData.glyph !== undefined ? it.modelData.glyph : ""
-                                    color: it.hot ? "white" : (it.off ? panelPal.fg2 : panelPal.fg)
-                                }
-                                Text {
-                                    visible: !it.isSep && it.modelData.checked === true
-                                    x: 11
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "\u2713"
-                                    color: it.hot ? "white" : panelPal.fg
-                                    font.family: Fonts.forWeight(Font.Normal, "Open Runde")
-                                    font.pixelSize: 13
-                                    font.weight: Font.Normal
-                                }
-                                Text {
-                                    visible: !it.isSep
-                                    x: ui.menuLead ? 28 : 12
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: parent.width - x - 12 - (sc.visible ? sc.implicitWidth + 12 : 0)
-                                    elide: Text.ElideRight
-                                    text: it.isSep ? "" : (it.armedNow ? I18n.tr("Click again to confirm") : I18n.tr(it.modelData.label))
-                                    color: it.hot ? "white" : (it.off ? panelPal.fg2 : panelPal.fg)
-                                    font.family: Fonts.forWeight(Font.Normal, "Open Runde")
-                                    font.pixelSize: 13
-                                    font.weight: Font.Normal
-                                }
-                                Text {
-                                    id: sc
-                                    visible: !it.isSep && it.modelData.shortcut !== undefined && it.modelData.shortcut !== ""
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 12
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: it.isSep ? "" : (it.modelData.shortcut || "")
-                                    color: it.hot ? Qt.rgba(1, 1, 1, 0.8) : panelPal.fg2
-                                    font.family: Fonts.forWeight(Font.Normal, "Open Runde")
-                                    font.pixelSize: 12
-                                    font.weight: Font.Normal
-                                }
-                                MouseArea {
-                                    id: ima
-                                    anchors.fill: parent
-                                    enabled: !it.isSep && !it.off
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        if (it.modelData.confirm === true && ui.armed !== it.modelData.label) {
-                                            ui.armed = it.modelData.label;
-                                            return;
+                Item {
+                    id: subMenuPop
+                    z: 11
+                    readonly property bool opening: ui.isMenu && ui.subMenuModel.length > 0
+                    width: 244
+                    height: subMenuCol.height + 14
+                    readonly property real rightX: menuPop.x + menuPop.width * root.barPopupScale + 4
+                    readonly property real leftX: menuPop.x - width * root.barPopupScale - 4
+                    x: (rightX + width * root.barPopupScale <= ui.width - 6 || leftX < 6)
+                        ? Math.min(ui.width - width * root.barPopupScale - 6, rightX)
+                        : leftX
+                    y: Math.max(root.barHeight + 3, Math.min(ui.height - height * root.barPopupScale - 8, menuPop.y + ui.subMenuRowY * root.barPopupScale))
+                    opacity: opening ? 1 : 0
+                    visible: opacity > 0
+                    scale: root.barPopupScale * (opening ? 1 : 0.96)
+                    transformOrigin: Item.TopLeft
+                    Behavior on opacity { NumberAnimation { duration: 80 } }
+                    Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
+
+                    LGlass {
+                        anchors.fill: parent
+                        backdrop: ui.glassSrc
+                        shaderUrl: root.glassShaderUrl
+                        liquid: root.liquidActive
+                        dark: root.panelDarkMode
+                        bx: subMenuPop.x; by: subMenuPop.y
+                        shadowAmt: 0
+                        flatInner: 1
+                        rimTint: 1
+                        ringW: 1.4
+                        cornerR: 14
+                        tint: root.glassOpacity
+                        thickness: 22
+                        strength: 0.55 * root.glassLiquid
+                        rim: root.glassRim
+                        grain: root.glassGrain
+                        blur: 42
+                        debug: root.glassDebug
+                        onShaderError: root.glassState = "failed"
+                    }
+                    MacParts.MenuBorder {
+                        z: 2
+                        anchors.fill: parent
+                        cornerR: 14
+                        dark: root.panelDarkMode
+                        tint: root.menuBorderColor
+                    }
+                    MouseArea {
+                        id: subPopHover
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onEntered: subCloseT.stop()
+                    }
+                    Column {
+                        id: subMenuCol
+                        x: 6; y: 7
+                        width: parent.width - 12
+                        Repeater {
+                            model: ui.subMenuModel
+                            delegate: MenuRowItem { lead: ui.subMenuLead; allowSub: false }
+                        }
+                    }
+                }
+
+                // ═════════ battery popover ═════════
+                Item {
+                    id: batPop
+                    z: 10
+                    readonly property real ps: root.barPopupScale
+                    readonly property real fullW: 300
+                    readonly property real fullH: batCol.height + 28
+                    readonly property real srcW: 44
+                    readonly property real srcH: 22
+                    readonly property real srcX: ui.menuX - 22
+                    readonly property real srcY: Math.max(0, (root.barHeight - srcH) / 2)
+                    readonly property real dstX: Math.max(6, Math.min(ui.width - fullW * ps - 8, ui.menuX - fullW * ps / 2))
+                    readonly property real dstY: root.barHeight + 6
+
+                    readonly property bool opening: ui.pop === "bat"
+                    property real openT: opening ? 1 : 0
+                    Behavior on openT {
+                        NumberAnimation {
+                            duration: batPop.opening ? 520 : 220
+                            easing.type: batPop.opening ? Easing.OutBack : Easing.InOutCubic
+                            easing.overshoot: 0.7
+                        }
+                    }
+                    readonly property real t: Math.max(0, Math.min(1, openT))
+                    readonly property real contentT: Math.max(0, Math.min(1, (openT - 0.28) / 0.55))
+
+                    width: (srcW + (fullW * ps - srcW) * openT) / ps
+                    height: (srcH + (fullH * ps - srcH) * openT) / ps
+                    x: srcX + (dstX - srcX) * openT
+                    y: srcY + (dstY - srcY) * openT
+                    opacity: Math.min(1, t * 4)
+                    visible: openT > 0.002
+                    scale: ps
+                    transformOrigin: Item.TopLeft
+
+                    readonly property real blurAmt: Math.pow(1 - t, 1.3)
+                    readonly property bool morphing: openT > 0.002 && Math.abs(openT - 1) > 0.002
+                    layer.enabled: morphing
+                    layer.smooth: true
+                    layer.effect: MultiEffect {
+                        blurEnabled: true
+                        blurMax: 48
+                        blur: batPop.blurAmt * 0.9
+                        autoPaddingEnabled: true
+                    }
+
+                    PopGlassCtx { id: batPopGlass; pop: batPop; frame: ui; source: ui.glassSrc; fullW: batPop.fullW; fullH: batPop.fullH }
+                    GGlass { anchors.fill: parent; gx: batPopGlass.ctx; cornerR: Math.min(26, 8 + 18 * batPop.t); thickness: 22; shadowAmt: 0; flatInner: 1 }
+                    MacParts.MenuBorder { z: 2; anchors.fill: parent; cornerR: Math.min(26, 8 + 18 * batPop.t); dark: batPopGlass.ctx.dark; tint: batPopGlass.ctx.borderTint; amount: 1 }
+                    MouseArea { anchors.fill: parent }
+
+                    Item {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        clip: true
+                        Item {
+                            x: -1; y: -1 + 10 * (1 - batPop.contentT)
+                            width: batPop.fullW; height: batPop.fullH
+                            opacity: batPop.contentT
+
+                            Column {
+                                id: batCol
+                                x: 14; y: 14
+                                width: parent.width - 28
+                                spacing: 10
+
+                                // Header: title + passthrough pill + live charge percentage
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+                                    Text {
+                                        width: parent.width - pctTxt.width - (passBadge.visible ? passBadge.width + 16 : 8)
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: I18n.tr("Battery")
+                                        color: pal.fg
+                                        font.family: root.fontForWeight(Font.DemiBold, pal.fam)
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Rectangle {
+                                        id: passBadge
+                                        visible: root.energyPassthrough
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: passLbl.implicitWidth + 12
+                                        height: 18
+                                        radius: 9
+                                        color: Qt.rgba(0.19, 0.82, 0.35, pal.dark ? 0.22 : 0.16)
+                                        border.width: 1
+                                        border.color: Qt.rgba(0.19, 0.82, 0.35, 0.45)
+                                        Text {
+                                            id: passLbl
+                                            anchors.centerIn: parent
+                                            text: I18n.tr("Passthrough")
+                                            color: "#30D158"
+                                            font.family: root.fontForWeight(Font.DemiBold, pal.fam)
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
                                         }
-                                        var run = it.modelData.run;
-                                        ui.pop = "";
-                                        if (run) run();
+                                    }
+                                    Text {
+                                        id: pctTxt
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: root.batPct + "%"
+                                        color: (root.charging || root.energyPassthrough) ? "#30D158" : (root.batPct <= 20 ? "#FF453A" : pal.fg)
+                                        font.family: root.fontForWeight(Font.DemiBold, pal.fam)
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+
+                                // Charge bar + remaining time / power source
+                                Column {
+                                    width: parent.width
+                                    spacing: 6
+                                    Rectangle {
+                                        width: parent.width; height: 7; radius: 3.5
+                                        color: pal.track
+                                        Rectangle {
+                                            width: Math.max(7, parent.width * Math.max(0, Math.min(1, root.batPct / 100)))
+                                            height: parent.height; radius: 3.5
+                                            color: (root.charging || root.energyPassthrough) ? "#30D158" : (root.batPct <= 20 ? "#FF453A" : root.accent)
+                                        }
+                                    }
+                                    Row {
+                                        width: parent.width
+                                        Text {
+                                            width: parent.width - srcTxt.width
+                                            elide: Text.ElideRight
+                                            text: root.batStatusText
+                                            color: pal.fg2
+                                            font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                            font.pixelSize: 11
+                                        }
+                                        Text {
+                                            id: srcTxt
+                                            text: root.acOnline ? I18n.tr("Power Adapter") : I18n.tr("Battery")
+                                            color: pal.fg2
+                                            font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                            font.pixelSize: 11
+                                        }
+                                    }
+                                }
+
+                                // Live power telemetry (consumption / charge rate / passthrough / AC input)
+                                Rectangle {
+                                    width: parent.width
+                                    height: telCol.height + 14
+                                    radius: 10
+                                    color: pal.tile
+                                    border.width: 1
+                                    border.color: pal.tileBorder
+                                    Column {
+                                        id: telCol
+                                        x: 10; y: 7
+                                        width: parent.width - 20
+                                        spacing: 4
+                                        Row {
+                                            width: parent.width
+                                            Text {
+                                                width: parent.width - flowValTxt.width
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.batFlowLabel
+                                                color: pal.fg2
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 11
+                                            }
+                                            Text {
+                                                id: flowValTxt
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.batFlowValue
+                                                color: (root.charging || root.energyPassthrough) ? "#30D158" : pal.fg
+                                                font.family: root.fontForWeight(Font.DemiBold, pal.fam)
+                                                font.pixelSize: 12
+                                                font.weight: Font.DemiBold
+                                            }
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            visible: root.acOnline
+                                            Text {
+                                                width: parent.width - acValTxt.width
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.acInputW >= 0 ? I18n.tr("Adapter Input") : I18n.tr("Power Delivery")
+                                                color: pal.fg2
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 11
+                                            }
+                                            Text {
+                                                id: acValTxt
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: root.acInputW >= 0
+                                                    ? (root.acInputW.toFixed(1) + " W")
+                                                    : (root.energyPassthrough ? I18n.tr("AC Direct (no meter)") : I18n.tr("AC (no meter)"))
+                                                color: pal.fg
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 11
+                                            }
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            visible: root.batFullWh > 0 || root.batVoltageV > 0
+                                            Text {
+                                                width: parent.width - healthTxt.width
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                elide: Text.ElideRight
+                                                text: (root.batFullWh > 0 ? (root.batEnergyWh.toFixed(1) + " / " + root.batFullWh.toFixed(1) + " Wh") : "")
+                                                    + (root.batVoltageV > 0 ? ((root.batFullWh > 0 ? " · " : "") + root.batVoltageV.toFixed(2) + " V") : "")
+                                                color: pal.fg3
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 10
+                                            }
+                                            Text {
+                                                id: healthTxt
+                                                visible: root.batHealthPct > 0
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: I18n.tr("Health ") + root.batHealthPct + "%"
+                                                color: pal.fg3
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 10
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle { width: parent.width; height: 1; color: pal.sep }
+
+                                // Energy Mode (powerprofilesctl)
+                                Column {
+                                    width: parent.width
+                                    spacing: 6
+                                    Text {
+                                        text: I18n.tr("Energy Mode")
+                                        color: pal.fg2
+                                        font.family: root.fontForWeight(Font.DemiBold, pal.fam)
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Rectangle {
+                                        width: parent.width; height: 30; radius: 9
+                                        color: pal.track
+                                        Row {
+                                            anchors.fill: parent
+                                            anchors.margins: 2
+                                            spacing: 2
+                                            Repeater {
+                                                model: [
+                                                    { id: "power-saver", label: I18n.tr("Low Power") },
+                                                    { id: "balanced", label: I18n.tr("Automatic") },
+                                                    { id: "performance", label: I18n.tr("High Power") }
+                                                ]
+                                                delegate: Item {
+                                                    id: segItem
+                                                    required property var modelData
+                                                    readonly property bool sel: root.powerProfile === modelData.id
+                                                    width: (parent.width - 4) / 3
+                                                    height: parent.height
+                                                    Rectangle {
+                                                        anchors.fill: parent; radius: 7
+                                                        color: segItem.sel ? root.accent : (segMa.containsMouse ? pal.hover : "transparent")
+                                                    }
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        width: parent.width - 8
+                                                        horizontalAlignment: Text.AlignHCenter
+                                                        elide: Text.ElideRight
+                                                        text: segItem.modelData.label
+                                                        color: segItem.sel ? "white" : pal.fg
+                                                        font.family: root.fontForWeight(segItem.sel ? Font.DemiBold : Font.Normal, pal.fam)
+                                                        font.pixelSize: 11
+                                                        font.weight: segItem.sel ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea {
+                                                        id: segMa
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        onClicked: root.setPowerProfile(segItem.modelData.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle { width: parent.width; height: 1; color: pal.sep }
+
+                                // Show Percentage toggle + Battery Settings shortcut
+                                Column {
+                                    width: parent.width
+                                    spacing: 2
+                                    Item {
+                                        width: parent.width; height: 30
+                                        Row {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 6; anchors.rightMargin: 6
+                                            Text {
+                                                width: parent.width - pctSwitch.width
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: I18n.tr("Show Percentage")
+                                                color: pal.fg
+                                                font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                                font.pixelSize: 13
+                                            }
+                                            Rectangle {
+                                                id: pctSwitch
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 34; height: 20; radius: 10
+                                                color: root.showBatteryPercent ? root.accent : pal.switchOff
+                                                Behavior on color { ColorAnimation { duration: 150 } }
+                                                Rectangle {
+                                                    width: 16; height: 16; radius: 8; y: 2
+                                                    x: root.showBatteryPercent ? 16 : 2
+                                                    color: "white"
+                                                    Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                                                }
+                                            }
+                                        }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: { root.showBatteryPercent = !root.showBatteryPercent; root.saveTimer.restart(); }
+                                        }
+                                    }
+                                    Item {
+                                        width: parent.width; height: 30
+                                        Rectangle {
+                                            anchors.fill: parent; radius: 8
+                                            color: root.accent
+                                            visible: batSetMa.containsMouse
+                                        }
+                                        Text {
+                                            x: 6; anchors.verticalCenter: parent.verticalCenter
+                                            text: I18n.tr("Battery Settings\u2026")
+                                            color: batSetMa.containsMouse ? "white" : pal.fg
+                                            font.family: root.fontForWeight(Font.Normal, pal.fam)
+                                            font.pixelSize: 13
+                                        }
+                                        MouseArea {
+                                            id: batSetMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: { ui.pop = ""; root.openSettings("battery"); }
+                                        }
                                     }
                                 }
                             }
@@ -7863,7 +8855,7 @@ Scope {
                         width: ccSrc.sourceRect.width; height: ccSrc.sourceRect.height
                         blurEnabled: true
                         blurMax: 64
-                        blur: Math.min(1.0, (ccg.blur * ccg.blurMul) * 1.4 / 64.0)
+                        blur: Math.min(0.14, (1.5 + (ccg.blur * ccg.blurMul) * 0.14) / 64.0)
                         autoPaddingEnabled: false
                         visible: false
                     }
@@ -7873,28 +8865,29 @@ Scope {
                         id: ccBlur
                         sourceItem: ccBlurFx
                         live: true
+                        mipmap: true
                         visible: false
                     }
                     MultiEffect {
                         id: ccBlur2Fx
                         source: ccBlur
                         width: ccSrc.sourceRect.width; height: ccSrc.sourceRect.height
-                        blurEnabled: (ccg.blur * ccg.blurMul) * 1.4 / 64.0 > 1.0
+                        blurEnabled: false
                         blurMax: 64
-                        blur: Math.max(0.0, Math.min(1.0, (ccg.blur * ccg.blurMul) * 1.4 / 64.0 - 1.0))
+                        blur: 0.0
                         autoPaddingEnabled: false
                         visible: false
                     }
                     // second Gaussian pass: only active when the slider goes past a single pass's 64 px limit
                     ShaderEffectSource {
                         id: ccBlur2
-                        sourceItem: (ccg.blur * ccg.blurMul) * 1.4 / 64.0 > 1.0 ? ccBlur2Fx : null
-                        live: true
+                        sourceItem: null
+                        live: false
                         visible: false
                     }
                     GlassCtx {
                         id: ccg
-                        src: (blur * blurMul) * 1.4 / 64.0 > 1.0 ? ccBlur2 : ccBlur
+                        src: ccBlur
                         srcRect: ccSrc.sourceRect
                         frame: ui
                         liquid: root.liquidActive
@@ -7902,22 +8895,20 @@ Scope {
                         dark: root.ccDark
                         // macOS style: the panel is the glass, so each control only keeps a faint shape on top of it
                         property bool niriTiles: root.nativeBackdrop
-                        tint: root.ccStyle === "macos" ? root.glassOpacity * 0.30
-                            : (root.nativeBackdrop ? root.glassOpacity * 0.76 : root.glassOpacity)
-                        strength: root.ccStyle === "macos" ? root.glassLiquid * 0.30
-                            : (root.nativeBackdrop ? root.glassLiquid * 1.08 : root.glassLiquid)
-                        rim: root.ccStyle === "macos" ? root.glassRim * 0.10
-                            : (root.nativeBackdrop ? root.glassRim * 0.62 : root.glassRim * 0.25)
-                        // A single blur pass on Niri preserves visible image detail
-                        // and costs less than the former 80px two-pass treatment.
-                        blurMul: root.nativeBackdrop && root.ccStyle !== "macos" ? 0.50 : 1.0
+                        tint: root.ccStyle === "macos" ? root.glassOpacity * 0.40
+                            : (root.nativeBackdrop ? root.glassOpacity * 0.65 : root.glassOpacity * 0.72)
+                        strength: root.ccStyle === "macos" ? root.glassLiquid * 0.45
+                            : (root.nativeBackdrop ? root.glassLiquid * 1.05 : root.glassLiquid)
+                        rim: root.ccStyle === "macos" ? root.glassRim * 0.55
+                            : root.glassRim * 1.15
+                        blurMul: root.nativeBackdrop && root.ccStyle !== "macos" ? 0.65 : 1.0
                         rimTint: 1
                         ringW: 0                            // the border is the QML CornerBorder now (see component CornerBorder)
                         borderTint: root.menuBorderColor
                         borderAmount: 1                     // strength of the CornerBorder on every tile / button / the panel
                         whiteEdge: false                    // no light inner ring on the non-liquid fallback pane
                         grain: root.glassGrain
-                        blur: root.glassBlur
+                        blur: Math.max(10, root.glassBlur)
                         debug: root.glassDebug
                         onFailed: root.glassState = "failed"
                     }
@@ -9579,7 +10570,7 @@ Scope {
                 radius: 24
             }
             WlrLayershell.layer: WlrLayer.Top
-            WlrLayershell.keyboardFocus: ui.pop === "spot" ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus: (!root.perfNoFocus && ui.pop === "spot") ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
             Item {
                 id: spotRoot
@@ -9712,7 +10703,7 @@ Scope {
                     // open. Prevent render-thread work on every text edit.
                     live: !(root.nativeBackdrop) && spotWin.openish
                     visible: false
-                    sourceRect: Qt.rect(spot.x - 128, spot.y - 128, spot.width + 256, 684)
+                    sourceRect: Qt.rect(spot.x - 128, spot.y - 128, spot.width + 256, Math.max(760, spot.height + 256))
                 }
                 MultiEffect {
                     id: spBlurFx
@@ -9779,12 +10770,11 @@ Scope {
                 Item {
                     id: spot
                     z: 10
-                    width: 640
+                    width: 720
                     readonly property var curPanel: ui.spMode === "apps" ? appsPanel : (ui.spMode === "clip" ? clipPanel : emojiPanel)
                     height: ui.spFull ? curPanel.height : (resPanel.visible ? resPanel.y + resPanel.height : spRow.height)
                     x: Math.round((spotRoot.width - width) / 2)
-                    // the search pill sits a little above the vertical centre of the screen (0.4 of the height; 0.5 = dead centre); the Applications panel centres itself instead
-                    y: Math.round(spotRoot.height * 0.4 - (ui.spFull ? curPanel.height / 2 : 24))
+                    y: Math.max(48, Math.round(ui.spFull ? (spotRoot.height * 0.5 - curPanel.height / 2) : (spotRoot.height * 0.28 - 24)))
                     Behavior on y { enabled: spot.vis > 0.99; NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
                     // opens with a springy pop; dismiss: quick fade + shrink
                     property real vis: 0
@@ -9857,7 +10847,7 @@ Scope {
                                 width: 18; height: 18
                                 kind: "search"; color: panelPal.fg2
                             }
-                            // placeholder: blur-morphs between "Spotlight Search" and the hovered button's name
+                            // placeholder: blur-morphs between mode prompt / hovered button name
                             MacParts.MorphText {
                                 x: spInput.x + 3
                                 width: spInput.width
@@ -9866,7 +10856,10 @@ Scope {
                                 animateWidth: false
                                 duration: 460
                                 blurMax: 48
-                                text: ui.spHoverLabel !== "" ? ui.spHoverLabel : I18n.tr("Spotlight Search")
+                                text: ui.spHoverLabel !== "" ? ui.spHoverLabel
+                                    : (ui.spMode === "files" ? I18n.tr("Files & ~/dev Projects")
+                                    : (ui.spMode === "actions" ? I18n.tr("Actions & Settings")
+                                    : I18n.tr("Spotlight Search")))
                                 color: panelPal.fg2
                                 font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 17
                                 elide: Text.ElideRight
@@ -9882,7 +10875,25 @@ Scope {
                                 selectedTextColor: "white"
                                 font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 17
                                 horizontalAlignment: /[\u0590-\u08ff]/.test(text) ? Text.AlignRight : Text.AlignLeft
-                                onTextChanged: { if (!ui.spFull) { ui.spQuery = text; ui.spSel = 0; ui.armed = ""; if (text === "") { ui.spPaintQuery = ""; spResultDebounce.stop(); } else spResultDebounce.restart(); if (/^(file|find)\s+/i.test(text)) root.updateFileSearch(text.replace(/^(file|find)\s+/i, "").trim()); } }
+                                onTextChanged: {
+                                    if (!ui.spFull) {
+                                        ui.spQuery = text;
+                                        ui.spSel = 0;
+                                        ui.armed = "";
+                                        if (text === "") {
+                                            ui.spPaintQuery = "";
+                                            spResultDebounce.stop();
+                                            root.updateFileSearch("");
+                                        } else {
+                                            spResultDebounce.restart();
+                                            var fq = text.replace(/^(file|find)\s+/i, "").trim();
+                                            if (/^(file|find)\s+/i.test(text) || ui.spMode === "files" || fq.length >= 2)
+                                                root.updateFileSearch(fq);
+                                            else
+                                                root.updateFileSearch("");
+                                        }
+                                    }
+                                }
                                 Keys.onPressed: event => ui.spKey(event)
                             }
                         }
@@ -9913,7 +10924,7 @@ Scope {
                                 onClicked: {
                                     if (modelData.id === "apps") ui.spSetMode(ui.spMode === "apps" ? "home" : "apps");
                                     else if (modelData.id === "actions") ui.spSetMode(ui.spMode === "actions" ? "home" : "actions");
-                                    else if (modelData.id === "files") { ui.pop = ""; root.sh("dolphin \"$HOME\""); }
+                                    else if (modelData.id === "files") ui.spSetMode(ui.spMode === "files" ? "home" : "files");
                                     else if (modelData.id === "clip") ui.spSetMode(ui.spMode === "clip" ? "home" : "clip");
                                     else ui.spSetMode(ui.spMode === "emoji" ? "home" : "emoji");
                                 }
@@ -9921,52 +10932,88 @@ Scope {
                         }
                     }
 
-                    // ── results under the pill ──
+                    // ── results + macOS Split Preview Pane under the pill ──
                     Item {
                         id: resPanel
                         y: spRow.height + 10
                         width: spot.width
-                        readonly property var items: ui.spFull ? [] : ui.spResults      // clipboard / emoji / apps have their own panels
-                        property int keep: 1                         // last non-empty row count, so the panel shrinks while it fades out
-                        onItemsChanged: if (items.length > 0) keep = items.length
-                        readonly property int selIdx: Math.max(0, Math.min(ui.spSel, items.length - 1))
+                        readonly property var items: ui.spFull ? [] : ui.spResults
+                        readonly property int selIdx: items.length > 0 ? Math.max(0, Math.min(ui.spSel, items.length - 1)) : -1
+                        readonly property var selItem: selIdx >= 0 ? items[selIdx] : null
+                        readonly property int maxH: Math.min(410, Math.max(220, Math.round(spotRoot.height * 0.52)))
+                        readonly property int listW: 382
+                        readonly property int naturalH: Math.min(maxH, Math.max(186, spList.contentHeight + 16))
                         opacity: (!ui.spFull && items.length > 0) ? 1 : 0
                         visible: opacity > 0
-                        Behavior on opacity { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
-                        height: (items.length > 0 ? items.length : keep) * 46 + 16
-                        Behavior on height { NumberAnimation { duration: 320; easing.type: Easing.OutQuint } }
-                        GGlass { anchors.fill: parent; gx: spg; cornerR: 26; thickness: 26; strengthMul: 1.0; shadowAmt: 0.10 }
+                        Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        height: items.length > 0 ? naturalH : 186
+                        Behavior on height { NumberAnimation { duration: 260; easing.type: Easing.OutQuint } }
+
+                        GGlass { anchors.fill: parent; gx: spg; cornerR: 26; thickness: 26; strengthMul: 1.0; shadowAmt: 0.12 }
                         MacParts.MenuBorder { amount: 0.5; anchors.fill: parent; cornerR: 26; dark: root.panelDarkMode; tint: root.menuBorderColor }
-                        Item {
+
+                        // Left: scrollable grouped results list
+                        ListView {
+                            id: spList
                             x: 8; y: 8
-                            width: parent.width - 16
+                            width: resPanel.listW - 12
                             height: parent.height - 16
                             clip: true
-                            Rectangle {
-                                y: resPanel.selIdx * 46
-                                width: parent.width; height: 46; radius: 16
-                                color: (resPanel.items[resPanel.selIdx] && resPanel.items[resPanel.selIdx].confirm === true
-                                        && ui.armed === resPanel.items[resPanel.selIdx].title) ? "#FF453A" : root.accent
-                                Behavior on y { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                            boundsBehavior: Flickable.StopAtBounds
+                            model: resPanel.items
+                            Connections {
+                                target: ui
+                                function onSpSelChanged() {
+                                    if (ui.spHover) { ui.spHover = false; return; }
+                                    if (!ui.spFull && resPanel.items.length > 0)
+                                        spList.positionViewAtIndex(resPanel.selIdx, ListView.Contain);
+                                }
                             }
-                        Column {
-                            width: parent.width
-                            Repeater {
-                                model: resPanel.items
-                                delegate: Item {
-                                    id: rr
-                                    required property var modelData
-                                    required property int index
-                                    readonly property string ico: (modelData && modelData.icon) ? String(modelData.icon) : ""
-                                    readonly property bool sel: index === Math.min(ui.spSel, resPanel.items.length - 1)
-                                    readonly property bool armedNow: modelData.confirm === true && ui.armed === modelData.title
+                            delegate: Column {
+                                id: rrCol
+                                required property var modelData
+                                required property int index
+                                readonly property bool showSec: {
+                                    if (!modelData || !modelData.section) return false;
+                                    if (index === 0) return true;
+                                    var prev = resPanel.items[index - 1];
+                                    return !prev || prev.section !== modelData.section;
+                                }
+                                width: spList.width
+                                Item {
+                                    visible: rrCol.showSec
                                     width: parent.width
-                                    height: 46
+                                    height: rrCol.index === 0 ? 20 : 24
+                                    Text {
+                                        x: 10
+                                        anchors.bottom: parent.bottom
+                                        anchors.bottomMargin: 4
+                                        text: (rrCol.modelData && rrCol.modelData.section) ? I18n.tr(rrCol.modelData.section).toUpperCase() : ""
+                                        color: panelPal.fg3
+                                        font.family: root.fontForWeight(Font.DemiBold, panelPal.fam)
+                                        font.pixelSize: 10
+                                        font.letterSpacing: 0.6
+                                        font.weight: Font.DemiBold
+                                    }
+                                }
+                                Item {
+                                    id: rr
+                                    readonly property string ico: (rrCol.modelData && rrCol.modelData.icon) ? String(rrCol.modelData.icon) : ""
+                                    readonly property bool sel: rrCol.index === resPanel.selIdx
+                                    readonly property bool armedNow: rrCol.modelData && rrCol.modelData.confirm === true && ui.armed === rrCol.modelData.title
+                                    width: parent.width
+                                    height: 44
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 14
+                                        color: rr.armedNow ? "#FF453A" : root.accent
+                                        opacity: rr.sel ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 80 } }
+                                    }
                                     Item {
-                                        x: 12
+                                        x: 10
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: 30; height: 30
+                                        width: 28; height: 28
                                         Image {
                                             visible: rr.ico !== ""
                                             anchors.fill: parent
@@ -9979,37 +11026,248 @@ Scope {
                                         Glyph {
                                             visible: rr.ico === ""
                                             anchors.centerIn: parent
-                                            width: 20; height: 20
-                                            kind: (rr.modelData && rr.modelData.glyph) ? rr.modelData.glyph : ""
+                                            width: 18; height: 18
+                                            kind: (rrCol.modelData && rrCol.modelData.glyph) ? rrCol.modelData.glyph : ""
                                             color: rr.sel ? "white" : panelPal.fg
                                         }
                                     }
                                     Text {
-                                        x: 54
+                                        x: 46
                                         anchors.verticalCenter: parent.verticalCenter
-                                        width: parent.width - 54 - 140
+                                        width: parent.width - 46 - (subLbl.visible ? Math.min(110, subLbl.implicitWidth + 14) : 10)
                                         elide: Text.ElideRight
-                                        text: rr.armedNow ? I18n.tr("Press Return again to confirm") : (rr.modelData ? rr.modelData.title : "")
+                                        text: rr.armedNow ? I18n.tr("Press Return again to confirm") : (rrCol.modelData ? rrCol.modelData.title : "")
                                         color: rr.sel ? "white" : panelPal.fg
-                                        font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 14
+                                        font.family: root.fontForWeight(rr.sel ? Font.Medium : Font.Normal, panelPal.fam)
+                                        font.pixelSize: 13
+                                        font.weight: rr.sel ? Font.Medium : Font.Normal
                                     }
                                     Text {
+                                        id: subLbl
+                                        visible: !rr.armedNow && rrCol.modelData && rrCol.modelData.sub !== undefined && rrCol.modelData.sub !== ""
                                         anchors.right: parent.right
-                                        anchors.rightMargin: 16
+                                        anchors.rightMargin: 10
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: rr.modelData ? rr.modelData.sub : ""
-                                        color: rr.sel ? Qt.rgba(1, 1, 1, 0.8) : panelPal.fg2
-                                        font.family: root.fontForWeight(Font.Normal, panelPal.fam); font.pixelSize: 12
+                                        width: Math.min(100, implicitWidth)
+                                        elide: Text.ElideRight
+                                        horizontalAlignment: Text.AlignRight
+                                        text: rrCol.modelData ? (rrCol.modelData.sub || "") : ""
+                                        color: rr.sel ? Qt.rgba(1, 1, 1, 0.82) : panelPal.fg2
+                                        font.family: root.fontForWeight(Font.Normal, panelPal.fam)
+                                        font.pixelSize: 11
                                     }
                                     MouseArea {
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        onEntered: ui.spSel = rr.index
-                                        onClicked: ui.spActivate(rr.index)
+                                        onEntered: {
+                                            if (ui.spSel !== rrCol.index) { ui.spHover = true; ui.spSel = rrCol.index; }
+                                        }
+                                        onClicked: ui.spActivate(rrCol.index)
                                     }
                                 }
                             }
                         }
+
+                        // Vertical hairline separator
+                        Rectangle {
+                            x: resPanel.listW
+                            y: 12
+                            width: 1
+                            height: parent.height - 24
+                            color: panelPal.sep
+                        }
+
+                        // Right: macOS Preview / Inspector Pane
+                        Item {
+                            id: spPreview
+                            x: resPanel.listW + 1
+                            y: 8
+                            width: parent.width - resPanel.listW - 9
+                            height: parent.height - 16
+                            readonly property var cur: resPanel.selItem
+                            readonly property string kind: cur && cur.previewKind ? cur.previewKind : ""
+
+                            Column {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: previewFooter.top
+                                anchors.margins: 14
+                                anchors.topMargin: 16
+                                spacing: 10
+                                visible: spPreview.cur !== null
+
+                                // Calculator / Conversion hero
+                                Column {
+                                    visible: spPreview.kind === "calc"
+                                    width: parent.width
+                                    spacing: 6
+                                    Rectangle {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: calcTag.implicitWidth + 14; height: 20; radius: 10
+                                        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, root.panelDarkMode ? 0.24 : 0.14)
+                                        Text {
+                                            id: calcTag
+                                            anchors.centerIn: parent
+                                            text: (spPreview.cur && spPreview.cur.sub) ? spPreview.cur.sub : I18n.tr("Calculator")
+                                            color: root.accent
+                                            font.family: root.fontForWeight(Font.DemiBold, panelPal.fam)
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WrapAnywhere
+                                        text: (spPreview.cur && spPreview.cur.answer) ? spPreview.cur.answer : (spPreview.cur ? spPreview.cur.title : "")
+                                        color: panelPal.fg
+                                        font.family: root.fontForWeight(Font.DemiBold, panelPal.fam)
+                                        font.pixelSize: 28
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WordWrap
+                                        text: (spPreview.cur && spPreview.cur.formula) ? ("= " + spPreview.cur.formula) : ""
+                                        color: panelPal.fg2
+                                        font.family: root.fontForWeight(Font.Normal, panelPal.fam)
+                                        font.pixelSize: 12
+                                    }
+                                }
+
+                                // App / File / Window / Action / Web hero
+                                Column {
+                                    visible: spPreview.kind !== "calc"
+                                    width: parent.width
+                                    spacing: 10
+                                    Item {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: 62; height: 62
+                                        Rectangle {
+                                            visible: !spPreview.cur || !spPreview.cur.icon || spPreview.cur.icon === ""
+                                            anchors.fill: parent
+                                            radius: 16
+                                            color: root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(0, 0, 0, 0.06)
+                                            border.width: 1
+                                            border.color: panelPal.sep
+                                        }
+                                        Image {
+                                            visible: spPreview.cur && spPreview.cur.icon && spPreview.cur.icon !== ""
+                                            anchors.fill: parent
+                                            source: (spPreview.cur && spPreview.cur.icon) ? spPreview.cur.icon : ""
+                                            sourceSize: Qt.size(128, 128)
+                                            fillMode: Image.PreserveAspectFit
+                                            asynchronous: true
+                                            smooth: true
+                                        }
+                                        Glyph {
+                                            visible: !spPreview.cur || !spPreview.cur.icon || spPreview.cur.icon === ""
+                                            anchors.centerIn: parent
+                                            width: 28; height: 28
+                                            kind: (spPreview.cur && spPreview.cur.glyph) ? spPreview.cur.glyph : "search"
+                                            color: spPreview.kind === "project" ? root.accent : panelPal.fg
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 2
+                                        wrapMode: Text.Wrap
+                                        text: spPreview.cur ? spPreview.cur.title : ""
+                                        color: panelPal.fg
+                                        font.family: root.fontForWeight(Font.DemiBold, panelPal.fam)
+                                        font.pixelSize: 15
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        horizontalAlignment: Text.AlignHCenter
+                                        wrapMode: Text.WrapAnywhere
+                                        maximumLineCount: 3
+                                        elide: Text.ElideMiddle
+                                        text: {
+                                            if (!spPreview.cur) return "";
+                                            if (spPreview.cur.path) return spPreview.cur.path;
+                                            if (spPreview.cur.detail) return spPreview.cur.detail;
+                                            return spPreview.cur.sub || "";
+                                        }
+                                        color: panelPal.fg2
+                                        font.family: root.fontForWeight(Font.Normal, panelPal.fam)
+                                        font.pixelSize: 11
+                                    }
+                                }
+                            }
+
+                            // Bottom Quick Actions footer inside Preview Pane
+                            Item {
+                                id: previewFooter
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 12
+                                height: 34
+                                visible: spPreview.cur !== null
+                                Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: panelPal.sep }
+                                Row {
+                                    anchors.centerIn: parent
+                                    anchors.verticalCenterOffset: 4
+                                    spacing: 8
+                                    Rectangle {
+                                        width: priTxt.implicitWidth + 18; height: 24; radius: 8
+                                        color: priMa.containsMouse ? root.accent : (root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08))
+                                        Text {
+                                            id: priTxt
+                                            anchors.centerIn: parent
+                                            text: {
+                                                if (!spPreview.cur) return "";
+                                                if (spPreview.kind === "calc") return I18n.tr("Copy (\u21b5)");
+                                                if (spPreview.kind === "web") return I18n.tr("Firefox (\u21b5)");
+                                                if (spPreview.kind === "window") return I18n.tr("Focus (\u21b5)");
+                                                if (spPreview.kind === "action") return I18n.tr("Run (\u21b5)");
+                                                return I18n.tr("Open (\u21b5)");
+                                            }
+                                            color: priMa.containsMouse ? "white" : panelPal.fg
+                                            font.family: root.fontForWeight(Font.Medium, panelPal.fam)
+                                            font.pixelSize: 11
+                                            font.weight: Font.Medium
+                                        }
+                                        MouseArea {
+                                            id: priMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: ui.spActivate(resPanel.selIdx)
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: spPreview.cur && spPreview.cur.altRun !== undefined
+                                        width: altTxt.implicitWidth + 18; height: 24; radius: 8
+                                        color: altMa.containsMouse ? root.accent : (root.panelDarkMode ? Qt.rgba(1, 1, 1, 0.12) : Qt.rgba(0, 0, 0, 0.08))
+                                        Text {
+                                            id: altTxt
+                                            anchors.centerIn: parent
+                                            text: (spPreview.cur && spPreview.cur.altLabel) ? (spPreview.cur.altLabel + " (\u21e7\u21b5)") : ""
+                                            color: altMa.containsMouse ? "white" : panelPal.fg
+                                            font.family: root.fontForWeight(Font.Medium, panelPal.fam)
+                                            font.pixelSize: 11
+                                            font.weight: Font.Medium
+                                        }
+                                        MouseArea {
+                                            id: altMa
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            onClicked: {
+                                                if (!spPreview.cur || !spPreview.cur.altRun) return;
+                                                var fn = spPreview.cur.altRun;
+                                                ui.pop = "";
+                                                fn();
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -10365,7 +11623,7 @@ Scope {
                                     id: tab
                                     required property string modelData
                                     required property int index
-                                    width: 60; height: 36
+                                    width: 68; height: 36
                                     Rectangle {
                                         anchors.centerIn: parent
                                         width: 48; height: 32; radius: 12
@@ -10394,7 +11652,7 @@ Scope {
 
                         GridView {
                             id: emojiGrid
-                            x: 20; y: 64 + 42
+                            x: Math.round((parent.width - width) / 2); y: 64 + 42
                             width: ui.emCols * emojiPanel.cell
                             height: emojiPanel.gridRows * emojiPanel.cell
                             cellWidth: emojiPanel.cell

@@ -31,9 +31,9 @@ Item {
             var w = width, h = height, lw = cb.lineW;
             if (w < 2 * lw || h < 2 * lw || cb.amount <= 0) return;
             // same colour as the background, but brighter (white mixed in, a bit more on light panels)
-            var k = cb.dark ? 0.42 : 0.55;
+            var k = cb.dark ? 0.55 : 0.65;
             var r0 = cb.tint.r + (1 - cb.tint.r) * k, g0 = cb.tint.g + (1 - cb.tint.g) * k, b0 = cb.tint.b + (1 - cb.tint.b) * k;
-            var a = Math.min(1, 0.72 * cb.amount);      // a bit translucent
+            var a = Math.min(1, 0.26 * cb.amount);      // soft diagonal accent so the shader's Fresnel rim leads
             var cx = w / 2, cy = h / 2, d = (w + h) / 4;
             var g = ctx.createLinearGradient(cx + d, cy - d, cx - d, cy + d);      // top-right end -> bottom-left end
             if (cb.fade) {

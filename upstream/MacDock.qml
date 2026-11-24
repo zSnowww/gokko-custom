@@ -921,7 +921,7 @@ Scope {
                             source: sbSrc
                             width: sbSrc.textureSize.width; height: sbSrc.textureSize.height
                             blurEnabled: true; blurMax: 48
-                            blur: Math.min(1, root.glassBlur * 1.4 * 0.5 / 48 + 0.25)
+                            blur: Math.min(0.16, (2.0 + root.glassBlur * 0.14) / 48.0)
                             autoPaddingEnabled: false
                             visible: false
                         }
@@ -938,15 +938,15 @@ Scope {
                             property vector2d srcOffset: Qt.vector2d(sidebar.x - sbg.pad + sbg.m, sidebar.y - sbg.pad + sbg.m)
                             property real pad: sbg.pad
                             property real radius: sidebar.radius
-                            property real bezel: 24
-                            property real thickness: 30 * root.glassLiquid * 1.6
-                            property real dispersion: 0.06 * root.glassLiquid * 1.3
-                            property real magnify: 0.03 * root.glassLiquid
-                            property real rim: Math.max(0.5, root.glassRim)
-                            property real grain: root.glassGrain * 0.2
-                            property real blurPx: 1.5
-                            property real tintMix: root.glassOpacity * 0.5
-                            property real saturation: 1.25
+                            property real bezel: 22
+                            property real thickness: 24 * root.glassLiquid * 0.95
+                            property real dispersion: 0.055 * root.glassLiquid
+                            property real magnify: 0.035 * root.glassLiquid
+                            property real rim: Math.max(0.55, root.glassRim * 1.15)
+                            property real grain: root.glassGrain * 0.25
+                            property real blurPx: 3.0 + Math.min(18.0, root.glassBlur * 0.36)
+                            property real tintMix: root.glassOpacity * 0.45
+                            property real saturation: 1.32
                             property real dark: root.dockDark ? 1 : 0
                             property real debug: 0
                             property real shadowAmt: 0.6
@@ -5123,8 +5123,10 @@ Scope {
                             property color edgeCol: root.bar ? root.bar.menuBorderColor : "#8A9AB5"
                             Behavior on edgeCol { ColorAnimation { duration: 450; easing.type: Easing.OutCubic } }
                             // blurring at half resolution is visually identical for radii >= 8 px and costs a quarter of the GPU work
-                            readonly property real ds: root.glassBlur >= 8 ? 0.5 : 1.0
-                            readonly property real bn: root.glassBlur * 1.5 * ds / 64.0
+                            // Keep pre-pass subtle so dockglass.frag keeps crisp refraction on the bezel
+                            readonly property real effBlur: Math.max(8, root.glassBlur)
+                            readonly property real ds: 1.0
+                            readonly property real bn: Math.min(0.14, (1.5 + effBlur * 0.14) / 64.0)
                             readonly property real margin: 72      // extra backdrop captured around the Dock (refraction + blur reach)
                             readonly property real padPx: root.dockGlassNew ? 30 : 10   // shader item padding (shadow room); dockglass.frag needs >= 30, the shared shader keeps its original 10
                             ShaderEffectSource {
@@ -5155,6 +5157,7 @@ Scope {
                                 id: bblur
                                 sourceItem: bblurFx
                                 live: !ui.tucked
+                                mipmap: true
                                 visible: false
                             }
                             MultiEffect {
@@ -5173,6 +5176,7 @@ Scope {
                                 // the 2nd pass is a pure copy unless the blur radius exceeds one pass: skip it then (same pixels, one GPU pass less)
                                 sourceItem: dg.bn > 1.0 ? bblur2Fx : null
                                 live: !ui.tucked
+                                mipmap: true
                                 visible: false
                             }
                             ShaderEffect {
@@ -5200,19 +5204,18 @@ Scope {
                                 property vector2d srcOffset: Qt.vector2d(parent.margin, parent.margin)
                                 property real pad: padPx
                                 property real radius: root.cornerRadius
-                                property real bezel: Math.min(dock.height * 0.36, 26)
-                                property real thickness: 30 * root.glassLiquid
-                                property real dispersion: 0.06 * root.glassLiquid
-                                property real magnify: 0.08 * root.glassLiquid
-                                property real rim: root.glassRim * 0.20
-                                property real grain: root.glassGrain * 0.3     // quieter noise on the Dock glass
-                                property real blurPx: 1.5            // tiny residual smoothing; the real blur is the MultiEffect pre-pass
-                                property real tintMix: root.glassOpacity * 0.55
-                                property real saturation: 1.25
+                                property real bezel: Math.min(dock.height * 0.34, 22)
+                                property real thickness: 24 * root.glassLiquid * 0.95
+                                property real dispersion: 0.055 * root.glassLiquid
+                                property real magnify: 0.045 * root.glassLiquid
+                                property real rim: Math.max(0.50, root.glassRim * 1.15)
+                                property real grain: root.glassGrain * 0.25
+                                property real blurPx: 2.5 + Math.min(18.0, dg.effBlur * 0.36)
+                                property real tintMix: root.glassOpacity * 0.45
+                                property real saturation: 1.32
                                 property real dark: root.dockDark ? 1 : 0
                                 property real debug: root.glassDebug ? 1 : 0
-                                // Keep the Dock glass clean: no drop shadow.
-                                property real shadowAmt: 0
+                                property real shadowAmt: 0.55
                                 property real rimTint: 0
                                 property real ringW: 0
                             }

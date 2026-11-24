@@ -10,6 +10,10 @@ VIEW_TAG="zsnow-gokko-custom"
 VIEW_HASH="$(printf '%s' "$VIEW_TAG" | sha256sum | cut -d' ' -f1)"
 VIEW_DIR="$STATE_ROOT/barstyle-views/gokko/$VIEW_HASH"
 INDEX_FILE="$STATE_ROOT/barstyles.json"
+LAUNCHER_TAG="zsnow-gokko-custom-launcher"
+LAUNCHER_HASH="$(printf '%s' "$LAUNCHER_TAG" | sha256sum | cut -d' ' -f1)"
+LAUNCHER_DIR="$STATE_ROOT/launcher-views/gokko/$LAUNCHER_HASH"
+LAUNCHER_INDEX="$STATE_ROOT/launchers.json"
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 DO_RELOAD=1
 DO_LINT=0
@@ -31,17 +35,31 @@ done
 
 if [[ "$DO_LINT" -eq 1 ]] && command -v qmllint >/dev/null 2>&1; then
     echo "Running qmllint..."
-    qmllint "$ROOT/upstream/MacDock.qml" "$ROOT/upstream/ResizeKnob.qml" "$ROOT/Scene.qml"
-    # Filter the known upstream IpcHandler `void` signature warning in MacBar.qml
-    if qmllint "$ROOT/upstream/MacBar.qml" 2>&1 \
-        | grep -Ev "Unexpected token \`void'|Expected token \`,'" \
-        | grep -Eiq 'error|syntax|expected|duplicate|not a type|unable'; then
-        echo "qmllint reported errors in upstream/MacBar.qml" >&2
-        exit 1
-    fi
+    qmllint "$ROOT/upstream/MacDock.qml" "$ROOT/upstream/ResizeKnob.qml" "$ROOT/Scene.qml" "$ROOT/upstream/MacGlyph.qml" "$ROOT/upstream/SpotEmojiPanel.qml" "$ROOT/upstream/SpotAppsPanel.qml"
+    # Filter the known upstream IpcHandler `void` signature warning in MacBar/GokkoSpotlight
+    for f in "$ROOT/upstream/MacBar.qml" "$ROOT/upstream/GokkoSpotlight.qml" "$ROOT/LauncherMain.qml"; do
+        if qmllint "$f" 2>&1 \
+            | grep -Ev "Unexpected token \`void'|Expected token \`,'|Unexpected token \`:'|Expected token \`;'" \
+            | grep -Eiq 'error|syntax|expected|duplicate|not a type|unable'; then
+            echo "qmllint reported errors in $f" >&2
+            qmllint "$f" 2>&1 | grep -Ev "Unexpected token \`void'|Expected token \`,'" >&2 || true
+            exit 1
+        fi
+    done
 fi
 
-mkdir -p "$VIEW_DIR"
+# Compile shaders if Qt's qsb compiler is available, and clear stale user shader caches
+QSB_BIN=""
+for q in qsb qsb6 qsb-qt6 /usr/lib/qt6/bin/qsb /usr/lib64/qt6/bin/qsb /usr/lib/qt/bin/qsb; do
+    if command -v "$q" >/dev/null 2>&1; then QSB_BIN="$q"; break; fi
+done
+if [[ -n "$QSB_BIN" ]]; then
+    "$QSB_BIN" --qt6 -o "$ROOT/upstream/liquidglass.frag.qsb" "$ROOT/upstream/liquidglass.frag"
+    "$QSB_BIN" --qt6 -o "$ROOT/upstream/dockglass.frag.qsb" "$ROOT/upstream/dockglass.frag"
+fi
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/macbar/"*.qsb "${XDG_CONFIG_HOME:-$HOME/.config}/macdock/"*.qsb
+
+mkdir -p "$VIEW_DIR" "$LAUNCHER_DIR"
 rsync -a --delete --exclude='*.qmlc' \
     "$ROOT/LICENSE" \
     "$ROOT/NOTICE.md" \
@@ -52,55 +70,62 @@ rsync -a --delete --exclude='*.qmlc' \
     "$ROOT/upstream" \
     "$VIEW_DIR/"
 
-python3 - "$INDEX_FILE" "$VERSION" "barstyle-views/gokko/$VIEW_HASH" << 'PY'
+rsync -a --delete --exclude='*.qmlc' \
+    "$ROOT/LICENSE" \
+    "$ROOT/NOTICE.md" \
+    "$ROOT/PROVENANCE.txt" \
+    "$ROOT/README.md" \
+    "$ROOT/VERSION" \
+    "$ROOT/upstream" \
+    "$LAUNCHER_DIR/"
+cp "$ROOT/LauncherMain.qml" "$LAUNCHER_DIR/Main.qml"
+
+python3 - "$INDEX_FILE" "$VERSION" "barstyle-views/gokko/$VIEW_HASH" "$LAUNCHER_INDEX" "launcher-views/gokko/$LAUNCHER_HASH" << 'PY'
 import json
 import os
 import sys
 import tempfile
 
-index_path, version, view_rel = sys.argv[1:]
-os.makedirs(os.path.dirname(index_path), exist_ok=True)
+index_path, version, view_rel, launcher_index_path, launcher_view_rel = sys.argv[1:]
 
-rows = []
-if os.path.exists(index_path):
-    with open(index_path, "r", encoding="utf-8") as f:
-        try:
-            data = json.load(f)
-            if isinstance(data, list):
-                rows = data
-        except Exception:
-            rows = []
+def update_index(path, extra):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    rows = []
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+                if isinstance(data, list):
+                    rows = data
+            except Exception:
+                rows = []
+    updated = False
+    for row in rows:
+        if isinstance(row, dict) and row.get("id") == "gokko":
+            row["version"] = version
+            row.update(extra)
+            updated = True
+            break
+    if not updated:
+        base = {"id": "gokko", "version": version}
+        base.update(extra)
+        rows.append(base)
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".store.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(rows, f, separators=(",", ":"))
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
 
-updated = False
-for row in rows:
-    if isinstance(row, dict) and row.get("id") == "gokko":
-        row["version"] = version
-        row["scene"] = "Scene.qml"
-        row["view"] = view_rel
-        updated = True
-        break
-
-if not updated:
-    rows.append({
-        "id": "gokko",
-        "version": version,
-        "scene": "Scene.qml",
-        "view": view_rel,
-    })
-
-fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(index_path), prefix=".barstyles.")
-try:
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(rows, f, separators=(",", ":"))
-    os.chmod(tmp_path, 0o600)
-    os.replace(tmp_path, index_path)
-except Exception:
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
-    raise
+update_index(index_path, {"scene": "Scene.qml", "view": view_rel})
+update_index(launcher_index_path, {"view": launcher_view_rel})
 PY
 
-echo "Installed custom Gokko ($VERSION) -> $VIEW_DIR"
+echo "Installed custom Gokko ($VERSION) -> $VIEW_DIR + $LAUNCHER_DIR"
 
 if [[ "$DO_RELOAD" -eq 1 ]] && command -v ryoku-shell >/dev/null 2>&1; then
     echo "Reloading ryoku-shell..."
