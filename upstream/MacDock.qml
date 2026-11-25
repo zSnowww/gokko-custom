@@ -239,6 +239,12 @@ Scope {
         "code", "discord", "spotify", "steam", "obsidian"
     ]   // used until you change pins from the dock; unknown ids are skipped
     property var pinned: defaultPinned
+    readonly property var defaultFolders: [
+        { path: Quickshell.env("HOME") + "/Downloads", view: "grid", sort: "date" }
+    ]
+    property var pinnedFolders: []
+    property bool foldersSeeded: false
+    signal folderStackToggle(var item, var screenObj)
     // ──────────────────────────────────
 
     // ═════════════════════════════════════════════════════════════════
@@ -2336,7 +2342,53 @@ Scope {
                         }
                     }
                 }
-                SLabel { t: pal; text: I18n.tr("Drag icons in the Dock to reorder them. Pins are saved to ~/.config/macdock/pinned.json.") }
+                    SLabel { t: pal; text: I18n.tr("Drag icons in the Dock to reorder them. Pins are saved to ~/.config/macdock/pinned.json.") }
+
+                SLabel { t: pal; header: true; text: I18n.tr("Folders in Dock (Stacks)") }
+                SCard {
+                    t: pal
+                    SRow {
+                        t: pal
+                        visible: root.pinnedFolders.length === 0
+                        title: I18n.tr("No folders are kept in the Dock")
+                        subtitle: I18n.tr("Add a folder here or drop one onto the Dock.")
+                    }
+                    Repeater {
+                        model: root.pinnedFolders
+                        delegate: SRow {
+                            id: folderRow
+                            required property var modelData
+                            required property int index
+                            t: pal
+                            title: root.folderNameFor(modelData.path)
+                            subtitle: root.displayFolderPath(modelData.path)
+                            iconSource: root.gokkoIconSrc({ special: "folder", icon: root.folderIconNameFor(modelData.path), name: title })
+                            Row {
+                                spacing: 6
+                                SButton {
+                                    t: pal
+                                    text: (folderRow.modelData.view === "list") ? I18n.tr("List") : I18n.tr("Grid")
+                                    onClicked: root.setFolderOpt(folderRow.modelData.path, "view", (folderRow.modelData.view === "list") ? "grid" : "list")
+                                }
+                                SButton {
+                                    t: pal
+                                    text: I18n.tr("Remove")
+                                    onClicked: root.removePinnedFolder(folderRow.modelData.path)
+                                }
+                            }
+                        }
+                    }
+                    SRow {
+                        t: pal
+                        title: I18n.tr("Add folder to Dock")
+                        subtitle: I18n.tr("Pinned folders appear on the right side next to Trash")
+                        SButton {
+                            t: pal
+                            text: I18n.tr("Add Folder\u2026")
+                            onClicked: root.pickFolder()
+                        }
+                    }
+                }
 
                 SCard {
                     t: pal
@@ -3688,7 +3740,7 @@ Scope {
     readonly property int bgHeight: iconSize + topPad + bottomPad
     readonly property int sepWidth: 9
     readonly property real magRadius: (iconSize + spacing) * 2.6
-    readonly property int menuRoom: 300
+    readonly property int menuRoom: 440
     readonly property int windowHeight: Math.ceil(margin + bgHeight + iconSize * (effMag - 1) + 72 + menuRoom)
     readonly property string configDir: Quickshell.env("HOME") + "/.config/macdock"
 
@@ -3746,6 +3798,8 @@ Scope {
 
     function resetPins() {
         pinned = defaultPinned;
+        pinnedFolders = defaultFolders.slice();
+        foldersSeeded = true;
         store.setText(JSON.stringify(defaultPinned.slice(), null, 2));
         rebuild();
     }
@@ -3774,7 +3828,8 @@ Scope {
     // ── settings persistence (~/.config/macdock/settings.json) ──
     readonly property string settingsSig: [dockEnabled, settingsEnabled, iconSize, magnification, magnificationEnabled, spacing, margin,
         cornerRadius, darkMode, appearanceMode, glassOpacity, glassBlur, glassLiquid, dockStyle, wallpaperPath, String(accent), fontFamily, hideMode, hideDelay, monitor,
-        showTrash, showLabels, showIndicators, bounceOnLaunch, showThumbs, windowCapture, glassLive, iconTint, iconTintColor, iconTintStrength].join("|")
+        showTrash, showLabels, showIndicators, bounceOnLaunch, showThumbs, windowCapture, glassLive, iconTint, iconTintColor, iconTintStrength,
+        foldersSeeded, JSON.stringify(pinnedFolders)].join("|")
     property bool settingsReady: false
     onSettingsReadyChanged: {
         if (settingsReady && Quickshell.env("RYOKU_MACSHELL_PROBE"))
@@ -3800,7 +3855,8 @@ Scope {
             hideMode: hideMode, hideDelay: hideDelay, monitor: monitor,
             showTrash: showTrash, showLabels: showLabels, showIndicators: showIndicators,
             bounceOnLaunch: bounceOnLaunch, showThumbs: showThumbs, windowCapture: windowCapture, glassLive: glassLive,
-            iconTint: iconTint, iconTintColor: iconTintColor, iconTintStrength: iconTintStrength
+            iconTint: iconTint, iconTintColor: iconTintColor, iconTintStrength: iconTintStrength,
+            pinnedFolders: pinnedFolders, foldersSeeded: foldersSeeded
         };
         settingsStore.setText(JSON.stringify(o, null, 2));
     }
@@ -3809,7 +3865,8 @@ Scope {
         if (!o || typeof o !== "object") return;
         var keys = ["dockEnabled", "settingsEnabled", "iconSize", "magnification", "magnificationEnabled", "spacing", "margin", "cornerRadius",
                     "darkMode", "appearanceMode", "glassOpacity", "dockStyle", "wallpaperPath", "glassDebug", "glassRim", "glassGrain", "glassLiquid", "glassBlur", "accent", "fontFamily", "hideMode", "hideDelay", "monitor",
-                    "showTrash", "showLabels", "showIndicators", "bounceOnLaunch", "showThumbs", "windowCapture", "glassLive", "iconTint", "iconTintColor", "iconTintStrength"];
+                    "showTrash", "showLabels", "showIndicators", "bounceOnLaunch", "showThumbs", "windowCapture", "glassLive", "iconTint", "iconTintColor", "iconTintStrength",
+                    "pinnedFolders", "foldersSeeded"];
         for (var i = 0; i < keys.length; i++) {
             if (o[keys[i]] === undefined) continue;
             try { root[keys[i]] = o[keys[i]]; } catch (err) { }
@@ -3822,16 +3879,31 @@ Scope {
         printErrors: false
         onLoaded: {
             try { root.applySettings(JSON.parse(text())); } catch (err) { }
+            var seededNow = false;
+            if (!root.foldersSeeded) {
+                root.foldersSeeded = true;
+                seededNow = true;
+                if (!Array.isArray(root.pinnedFolders) || root.pinnedFolders.length === 0)
+                    root.pinnedFolders = root.defaultFolders.slice();
+            }
             if (!root.captureSafetyApplied) {
                 root.captureSafetyApplied = true;
                 root.windowCapture = false;
                 root.glassLive = false;
             }
             root.settingsReady = true;
+            if (seededNow) saveTimer.restart();
+            root.rebuild();
             if (root.dockStyle === "liquid") root.startGlass();
         }
         onLoadFailed: {
+            if (!root.foldersSeeded) {
+                root.foldersSeeded = true;
+                root.pinnedFolders = root.defaultFolders.slice();
+            }
             root.settingsReady = true;
+            saveTimer.restart();
+            root.rebuild();
             if (root.dockStyle === "liquid") root.startGlass();
         }
     }
@@ -3995,6 +4067,14 @@ Scope {
         var raw = String(it.icon || "");
         if (raw === root.logoPath || it.special === "custom")
             return root.iconSrc(raw);
+        if (it.special === "folder") {
+            var folderIcon = gokkoIndexedIcon(raw) || gokkoIndexedIcon("folder") || gokkoIndexedIcon("inode-directory");
+            if (folderIcon !== "") return "file://" + folderIcon;
+            void Ryoku.Icons.rev;
+            var themedFolder = Ryoku.Icons.path(raw || "folder", true) || Ryoku.Icons.path("folder", true);
+            if (themedFolder && themedFolder.indexOf("image://icon/") !== 0) return themedFolder;
+            return "file://" + root.logoPath;
+        }
         var choices = gokkoIconCandidates(it);
         var fallback = "";
         var themeMarker = theme ? "/" + theme + "/" : "";
@@ -4056,6 +4136,132 @@ Scope {
             if (path !== "") return path;
         }
         return iconSrc(raw);
+    }
+
+    function normalizeFolderPath(p) {
+        var s = String(p || "").trim();
+        if (s.indexOf("file://") === 0) s = decodeURIComponent(s.replace(/^file:\/\//, ""));
+        var home = Quickshell.env("HOME") || "";
+        if (s === "~") s = home;
+        else if (s.indexOf("~/") === 0) s = home + s.substring(1);
+        while (s.length > 1 && s.charAt(s.length - 1) === "/") s = s.substring(0, s.length - 1);
+        return s;
+    }
+
+    function displayFolderPath(p) {
+        var s = normalizeFolderPath(p);
+        var home = Quickshell.env("HOME") || "";
+        if (home !== "" && s === home) return "~";
+        if (home !== "" && s.indexOf(home + "/") === 0) return "~" + s.substring(home.length);
+        return s;
+    }
+
+    function folderNameFor(p) {
+        var s = normalizeFolderPath(p);
+        if (s === "/") return "/";
+        var home = Quickshell.env("HOME") || "";
+        if (home !== "" && s === home) return I18n.tr("Home");
+        var idx = s.lastIndexOf("/");
+        return idx >= 0 ? s.substring(idx + 1) : s;
+    }
+
+    function folderIconNameFor(p) {
+        var s = normalizeFolderPath(p);
+        var home = Quickshell.env("HOME") || "";
+        if (s === home) return "user-home";
+        if (s === home + "/Downloads" || s === home + "/Descargas") return "folder-download";
+        if (s === home + "/Documents" || s === home + "/Documentos") return "folder-documents";
+        if (s === home + "/Pictures" || s === home + "/Imágenes") return "folder-pictures";
+        if (s === home + "/Music" || s === home + "/Música") return "folder-music";
+        if (s === home + "/Videos" || s === home + "/Vídeos") return "folder-videos";
+        if (s === home + "/Desktop" || s === home + "/Escritorio") return "user-desktop";
+        return "folder";
+    }
+
+    function addPinnedFolder(rawPath) {
+        var p = normalizeFolderPath(rawPath);
+        if (p === "") return;
+        var next = [];
+        var cur = Array.isArray(pinnedFolders) ? pinnedFolders : [];
+        for (var i = 0; i < cur.length; i++) {
+            var e = cur[i];
+            if (!e || !e.path) continue;
+            if (normalizeFolderPath(e.path) === p) return;
+            next.push(e);
+        }
+        next.push({ path: p, view: "grid", sort: "date" });
+        foldersSeeded = true;
+        pinnedFolders = next;
+        rebuild();
+    }
+
+    function removePinnedFolder(rawPath) {
+        var p = normalizeFolderPath(rawPath);
+        var next = [];
+        var cur = Array.isArray(pinnedFolders) ? pinnedFolders : [];
+        for (var i = 0; i < cur.length; i++) {
+            var e = cur[i];
+            if (!e || !e.path || normalizeFolderPath(e.path) === p) continue;
+            next.push(e);
+        }
+        foldersSeeded = true;
+        pinnedFolders = next;
+        rebuild();
+    }
+
+    function setFolderOpt(rawPath, prop, val) {
+        var p = normalizeFolderPath(rawPath);
+        var next = [];
+        var cur = Array.isArray(pinnedFolders) ? pinnedFolders : [];
+        for (var i = 0; i < cur.length; i++) {
+            var e = cur[i];
+            if (!e || !e.path) continue;
+            if (normalizeFolderPath(e.path) === p) {
+                var copy = { path: e.path, view: e.view || "grid", sort: e.sort || "date" };
+                copy[prop] = val;
+                next.push(copy);
+            } else {
+                next.push(e);
+            }
+        }
+        pinnedFolders = next;
+        rebuild();
+    }
+
+    function stackEntryIconSrc(entry) {
+        if (!entry) return gokkoIconSrc({ special: "folder", icon: "folder" });
+        var ext = String(entry.ext || "").toLowerCase();
+        if (!entry.isDir && /^(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(ext) && entry.size < 16777216)
+            return "file://" + encodeURI(entry.path).replace(/#/g, "%23").replace(/\?/g, "%3F");
+        var iconName = entry.isDir ? "folder" : "text-x-generic";
+        if (!entry.isDir) {
+            if (ext === "pdf") iconName = "application-pdf";
+            else if (/^(zip|tar|gz|xz|zst|7z|rar|bz2)$/.test(ext)) iconName = "package-x-generic";
+            else if (/^(mp3|flac|wav|ogg|m4a|opus)$/.test(ext)) iconName = "audio-x-generic";
+            else if (/^(mp4|mkv|webm|mov|avi)$/.test(ext)) iconName = "video-x-generic";
+            else if (/^(sh|py|js|ts|tsx|jsx|qml|rs|go|c|cpp|h|json|toml|yaml|yml|md)$/.test(ext)) iconName = "text-x-script";
+        }
+        var p = gokkoIndexedIcon(iconName) || gokkoIndexedIcon(entry.isDir ? "folder" : "application-x-generic") || gokkoIndexedIcon("folder");
+        if (p !== "") return "file://" + p;
+        return "file://" + root.logoPath;
+    }
+
+    function pickFolder() {
+        if (!pickFolderProc.running) pickFolderProc.running = true;
+    }
+
+    Process {
+        id: pickFolderProc
+        command: ["sh", "-c",
+            "if command -v zenity >/dev/null 2>&1; then zenity --file-selection --directory --title='Add Folder to Dock' 2>/dev/null; "
+            + "elif command -v kdialog >/dev/null 2>&1; then kdialog --getexistingdirectory \"$HOME\" 2>/dev/null; "
+            + "elif command -v yad >/dev/null 2>&1; then yad --file --directory --title='Add Folder to Dock' 2>/dev/null; fi"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var d = text.trim();
+                if (d !== "") root.addPinnedFolder(d);
+            }
+        }
     }
 
     // ── Trash state: the standard XDG trash (~/.local/share/Trash/files) is what Dolphin's trash:/ shows ──
@@ -4126,8 +4332,13 @@ Scope {
         return out;
     }
 
-    function activate(item, forceNew) {
+    function activate(item, forceNew, screenObj) {
         if (item.kind === "win") { if (item.tl) item.tl.activate(); return; }
+        if (item.special === "folder") {
+            if (forceNew) Quickshell.execDetached(["xdg-open", item.path]);
+            else root.folderStackToggle(item, screenObj || null);
+            return;
+        }
         if (item.special === "trash") {
             // the file manager first (Dolphin understands trash:/ natively); xdg-open only as the last resort
             Quickshell.execDetached(["sh", "-c",
@@ -4209,10 +4420,30 @@ Scope {
             m.push({ kind: "item", label: I18n.tr("Settings\u2026"), run: function() { root.openPrefs(); } });
             return m;
         }
+        if (item.special === "folder") {
+            m.push({ kind: "item", label: I18n.tr("Open") + " \"" + item.name + "\"", run: function () { Quickshell.execDetached(["xdg-open", item.path]); } });
+            m.push({ kind: "sep" });
+            m.push({ kind: "item", label: (item.folderView !== "list" ? "\u2713  " : "    ") + I18n.tr("View as Grid"),
+                     run: function () { root.setFolderOpt(item.path, "view", "grid"); } });
+            m.push({ kind: "item", label: (item.folderView === "list" ? "\u2713  " : "    ") + I18n.tr("View as List"),
+                     run: function () { root.setFolderOpt(item.path, "view", "list"); } });
+            m.push({ kind: "sep" });
+            m.push({ kind: "item", label: (item.folderSort !== "name" ? "\u2713  " : "    ") + I18n.tr("Sort by Date Added"),
+                     run: function () { root.setFolderOpt(item.path, "sort", "date"); } });
+            m.push({ kind: "item", label: (item.folderSort === "name" ? "\u2713  " : "    ") + I18n.tr("Sort by Name"),
+                     run: function () { root.setFolderOpt(item.path, "sort", "name"); } });
+            m.push({ kind: "sep" });
+            m.push({ kind: "item", label: I18n.tr("Add Folder\u2026"), run: function () { root.pickFolder(); } });
+            m.push({ kind: "item", label: I18n.tr("Remove from Dock"), run: function () { root.removePinnedFolder(item.path); } });
+            m.push({ kind: "sep" });
+            m.push({ kind: "item", label: I18n.tr("Settings\u2026"), run: function () { root.openPrefs("apps"); } });
+            return m;
+        }
         if (item.special === "trash") {
             m.push({ kind: "item", label: I18n.tr("Open"), run: function () { activate(item, false); } });
             m.push({ kind: "item", label: I18n.tr("Empty Trash"), confirm: true, disabled: !trashFull, run: function () { root.emptyTrash(); } });
             m.push({ kind: "sep" });
+            m.push({ kind: "item", label: I18n.tr("Add Folder to Dock\u2026"), run: function () { root.pickFolder(); } });
             m.push({ kind: "item", label: I18n.tr("Settings\u2026"), run: function() { root.openPrefs(); } });
             return m;
         }
@@ -4312,11 +4543,29 @@ Scope {
         for (var wi = 0; wi < winIdList.length; wi++) if (liveWins.indexOf(winIdList[wi].tl) >= 0) keep.push(winIdList[wi]);
         winIdList = keep;
 
-        if (showTrash || winItems.length > 0) {
+        var folderItems = [], seenFolders = {};
+        var pf = Array.isArray(pinnedFolders) ? pinnedFolders : [];
+        for (var fi = 0; fi < pf.length; fi++) {
+            var fe = pf[fi];
+            if (!fe || !fe.path) continue;
+            var fp = normalizeFolderPath(fe.path);
+            if (fp === "" || seenFolders[fp]) continue;
+            seenFolders[fp] = true;
+            folderItems.push({
+                kind: "folder", key: "dir:" + fp, path: fp,
+                name: folderNameFor(fp), icon: folderIconNameFor(fp),
+                entry: null, running: false, pinned: true, special: "folder",
+                folderView: fe.view === "list" ? "list" : "grid",
+                folderSort: fe.sort === "name" ? "name" : "date"
+            });
+        }
+
+        if (showTrash || winItems.length > 0 || folderItems.length > 0) {
             list.push({ kind: "sep", key: "sep:win" });
             for (var wj = 0; wj < winItems.length; wj++) list.push(winItems[wj]);
         }
-        if (showTrash && winItems.length > 0) list.push({ kind: "sep", key: "sep:trash" });
+        if (winItems.length > 0 && (folderItems.length > 0 || showTrash)) list.push({ kind: "sep", key: "sep:trash" });
+        for (var fj = 0; fj < folderItems.length; fj++) list.push(folderItems[fj]);
         if (showTrash) {
             list.push({ kind: "app", key: "__trash", name: "Trash", icon: "user-trash",
                         entry: null, running: false, pinned: true, special: "trash" });
@@ -4363,7 +4612,7 @@ Scope {
                 it.fresh = !firstBuild && !knownKeys[it.key];
                 nowKeys[it.key] = true;
             }
-            sig.push(it.kind + ":" + (it.key || "") + ":" + it.running + ":" + (it.icon || "") + (it.leaving ? ":L" : ""));
+            sig.push(it.kind + ":" + (it.key || "") + ":" + it.running + ":" + (it.icon || "") + ":" + (it.folderView || "") + ":" + (it.folderSort || "") + (it.leaving ? ":L" : ""));
         }
         appCount = nA;
         sepCount = nS;
@@ -4731,9 +4980,94 @@ Scope {
                 property var menuItem: null
                 property var menuModel: []
                 property string armed: ""            // label of a confirm-type entry that was clicked once (e.g. Empty Trash)
-                onMenuItemChanged: armed = ""
+                onMenuItemChanged: { armed = ""; if (menuItem !== null) stackItem = null; }
                 property real menuCx: 0
                 readonly property bool menuOpen: menuItem !== null
+                property var stackItem: null
+                property real stackCx: 0
+                property var stackEntries: []
+                property int stackTotal: 0
+                property bool stackLoading: false
+                property bool externalDragOver: false
+                readonly property bool stackOpen: stackItem !== null
+                onStackItemChanged: if (stackItem !== null) menuItem = null
+                function loadStack(it) {
+                    if (!it || !it.path) return;
+                    stackLoading = true;
+                    if (stackListProc.running) stackListProc.running = false;
+                    stackListProc.command = [
+                        "python3", "-c",
+                        "import os, sys, json\n"
+                        + "p, mode = sys.argv[1], sys.argv[2]\n"
+                        + "rows = []\n"
+                        + "try:\n"
+                        + "  with os.scandir(p) as it:\n"
+                        + "    for e in it:\n"
+                        + "      if e.name.startswith('.'): continue\n"
+                        + "      try:\n"
+                        + "        st = e.stat(follow_symlinks=True)\n"
+                        + "        is_dir = e.is_dir(follow_symlinks=True)\n"
+                        + "        ext = '' if is_dir else (e.name.rsplit('.', 1)[1].lower() if '.' in e.name else '')\n"
+                        + "        rows.append({'name': e.name, 'path': e.path, 'isDir': is_dir, 'ext': ext, 'size': int(st.st_size), 'mtime': float(st.st_mtime)})\n"
+                        + "      except OSError:\n"
+                        + "        pass\n"
+                        + "except OSError:\n"
+                        + "  pass\n"
+                        + "total = len(rows)\n"
+                        + "if mode == 'name':\n"
+                        + "  rows.sort(key=lambda r: (0 if r['isDir'] else 1, r['name'].lower()))\n"
+                        + "else:\n"
+                        + "  rows.sort(key=lambda r: -r['mtime'])\n"
+                        + "print(json.dumps({'items': rows[:48], 'total': total}))\n",
+                        String(it.path), String(it.folderSort || "date")
+                    ];
+                    stackListProc.running = true;
+                }
+                function openStackFor(it, cx) {
+                    if (stackItem && stackItem.key === it.key) { stackItem = null; return; }
+                    stackEntries = [];
+                    stackTotal = 0;
+                    stackCx = cx;
+                    stackItem = it;
+                    loadStack(it);
+                }
+                Process {
+                    id: stackListProc
+                    stdout: StdioCollector {
+                        onStreamFinished: {
+                            ui.stackLoading = false;
+                            try {
+                                var o = JSON.parse(text);
+                                ui.stackEntries = Array.isArray(o.items) ? o.items : [];
+                                ui.stackTotal = Number(o.total || ui.stackEntries.length);
+                            } catch (err) {
+                                ui.stackEntries = [];
+                                ui.stackTotal = 0;
+                            }
+                        }
+                    }
+                    onExited: ui.stackLoading = false
+                }
+                Connections {
+                    target: root
+                    function onFolderStackToggle(item, screenObj) {
+                        if (screenObj && screenObj !== win.modelData) return;
+                        var cx = ui.width / 2;
+                        for (var i = 0; i < rep.count; i++) {
+                            var c = rep.itemAt(i);
+                            if (c && c.key === item.key) { cx = c.mapToItem(ui, c.width / 2, 0).x; break; }
+                        }
+                        ui.openStackFor(item, cx);
+                    }
+                    function onItemsChanged() {
+                        if (!ui.stackOpen) return;
+                        var updated = root.itemMap[ui.stackItem.key];
+                        if (!updated) { ui.stackItem = null; return; }
+                        var resort = updated.folderSort !== ui.stackItem.folderSort;
+                        ui.stackItem = updated;
+                        if (resort) ui.loadStack(updated);
+                    }
+                }
                 readonly property bool wantsHide: root.hideMode === "always"
                     || (root.hideMode === "smart" && root.busyMonitors[dockGeo.sname] === true)
                 property bool dragging: false
@@ -4926,7 +5260,7 @@ Scope {
                     onFinished: { ui.tearItem = null; ui.tearAddr = ""; }
                 }
 
-                readonly property bool tucked: wantsHide && !revealed && !menuOpen && !dragging && !tearing
+                readonly property bool tucked: wantsHide && !revealed && !menuOpen && !stackOpen && !dragging && !tearing && !externalDragOver
                 readonly property real refLeft: (width - root.totalW0) / 2
                 readonly property real activeTop: height - root.margin - root.bgHeight
                                                   - root.iconSize * (root.effMag - 1) - 12
@@ -5099,10 +5433,88 @@ Scope {
 
                 Item {
                     id: maskItem
-                    x: ui.menuOpen ? 0 : dock.x
-                    width: ui.menuOpen ? ui.width : dock.width
-                    y: ui.menuOpen ? 0 : (ui.tucked ? ui.height - 3 : (hh.hovered ? ui.activeTop : dock.y))
+                    x: (ui.menuOpen || ui.stackOpen) ? 0 : (ui.externalDragOver ? Math.max(0, dock.x - 24) : dock.x)
+                    width: (ui.menuOpen || ui.stackOpen) ? ui.width : (ui.externalDragOver ? Math.min(ui.width, dock.width + 48) : dock.width)
+                    y: (ui.menuOpen || ui.stackOpen) ? 0 : (ui.tucked ? ui.height - 6 : ((hh.hovered || ui.externalDragOver) ? ui.activeTop : dock.y))
                     height: ui.height - y
+                }
+
+                // External file-manager drag-and-drop onto the Dock (works even when the Dock is auto-hidden)
+                Timer {
+                    id: dragExitHold
+                    interval: 180
+                    onTriggered: ui.externalDragOver = false
+                }
+                DropArea {
+                    id: folderDropArea
+                    x: Math.max(0, dock.x - 24)
+                    width: Math.min(ui.width, dock.width + 48)
+                    y: ui.tucked ? ui.height - 6 : Math.max(0, dock.y - 16)
+                    height: ui.height - y
+                    z: 40
+                    function handleDragEvent(drag) {
+                        var hasData = drag.hasUrls || drag.hasText || (drag.formats && drag.formats.length > 0);
+                        if (!hasData) return false;
+                        dragExitHold.stop();
+                        ui.externalDragOver = true;
+                        ui.revealed = true;
+                        drag.accept(Qt.CopyAction);
+                        return true;
+                    }
+                    onEntered: drag => handleDragEvent(drag)
+                    onPositionChanged: drag => handleDragEvent(drag)
+                    onExited: dragExitHold.restart()
+                    onDropped: drop => {
+                        dragExitHold.stop();
+                        ui.externalDragOver = false;
+                        var candidates = [];
+                        if (drop.hasUrls && drop.urls) {
+                            for (var i = 0; i < drop.urls.length; i++) candidates.push(String(drop.urls[i]));
+                        }
+                        var uriData = "";
+                        try { uriData = String(drop.getDataAsString("text/uri-list") || ""); } catch (e1) {}
+                        if (uriData !== "") candidates.push(uriData);
+                        var gnomeData = "";
+                        try { gnomeData = String(drop.getDataAsString("x-special/gnome-copied-files") || ""); } catch (e2) {}
+                        if (gnomeData !== "") candidates.push(gnomeData);
+                        var plainData = "";
+                        try { plainData = String(drop.getDataAsString("text/plain;charset=utf-8") || drop.getDataAsString("text/plain") || drop.text || ""); } catch (e3) {}
+                        if (plainData !== "") candidates.push(plainData);
+                        if (candidates.length === 0) return;
+                        drop.accept(Qt.CopyAction);
+                        var args = [
+                            "python3", "-c",
+                            "import os, sys, urllib.parse, json\n"
+                            + "seen, dirs = set(), []\n"
+                            + "for raw in sys.argv[1:]:\n"
+                            + "  for line in raw.splitlines():\n"
+                            + "    s = line.strip()\n"
+                            + "    if not s or s.startswith('#') or s in ('copy', 'cut'): continue\n"
+                            + "    if s.startswith('file://'):\n"
+                            + "      p = urllib.parse.unquote(urllib.parse.urlparse(s).path)\n"
+                            + "    else:\n"
+                            + "      p = s\n"
+                            + "    p = os.path.realpath(p)\n"
+                            + "    if os.path.isdir(p) and p not in seen:\n"
+                            + "      seen.add(p); dirs.append(p)\n"
+                            + "print(json.dumps(dirs))\n"
+                        ];
+                        for (var c = 0; c < candidates.length; c++) args.push(candidates[c]);
+                        if (dropDirProc.running) dropDirProc.running = false;
+                        dropDirProc.command = args;
+                        dropDirProc.running = true;
+                    }
+                }
+                Process {
+                    id: dropDirProc
+                    stdout: StdioCollector {
+                        onStreamFinished: {
+                            try {
+                                var dirs = JSON.parse(text);
+                                for (var i = 0; i < dirs.length; i++) root.addPinnedFolder(dirs[i]);
+                            } catch (err) { }
+                        }
+                    }
                 }
 
                 Item {
@@ -5112,6 +5524,19 @@ Scope {
                     anchors.horizontalCenter: parent.horizontalCenter
                     y: ui.height - root.margin - height + (ui.tucked ? height + root.margin + 6 : 0)
                     Behavior on y { NumberAnimation { duration: 240; easing.type: Easing.OutCubic } }
+
+                    // Subtle accent outline while dragging a folder from the file manager over the Dock
+                    Rectangle {
+                        anchors.fill: parent
+                        z: 25
+                        radius: root.cornerRadius
+                        color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.14)
+                        border.width: 2
+                        border.color: root.accent
+                        opacity: ui.externalDragOver ? 1 : 0
+                        visible: opacity > 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                    }
 
                     // ── Apple Liquid Glass: real-time refraction of the backdrop (see liquidglass.frag) ──
                     Loader {
@@ -5576,7 +6001,7 @@ Scope {
                                             ui.menuModel = root.menuFor(cell.modelData);
                                             ui.menuItem = cell.modelData;
                                         } else {
-                                            root.activate(cell.modelData, mouse.button === Qt.MiddleButton);
+                                            root.activate(cell.modelData, mouse.button === Qt.MiddleButton, win.modelData);
                                         }
                                     }
                                 }
@@ -5588,10 +6013,211 @@ Scope {
                 MouseArea {
                     anchors.fill: parent
                     z: 50
-                    visible: ui.menuOpen
-                    enabled: ui.menuOpen
+                    visible: ui.menuOpen || ui.stackOpen
+                    enabled: ui.menuOpen || ui.stackOpen
                     acceptedButtons: Qt.AllButtons
-                    onPressed: ui.menuItem = null
+                    onPressed: { ui.menuItem = null; ui.stackItem = null; }
+                }
+
+                // ── Folder Stack Popover (macOS Grid / List view) ──
+                Rectangle {
+                    id: stackPop
+                    z: 58
+                    visible: opacity > 0
+                    opacity: ui.stackOpen ? 1 : 0
+                    scale: ui.stackOpen ? 1 : 0.95
+                    transformOrigin: Item.Bottom
+                    Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+
+                    readonly property bool isList: ui.stackItem && ui.stackItem.folderView === "list"
+                    readonly property int cols: 4
+                    readonly property int cellW: 92
+                    readonly property int cellH: 94
+                    readonly property int rowsVisible: Math.max(1, Math.min(3, Math.ceil(Math.max(1, ui.stackEntries.length) / cols)))
+                    readonly property int listRowsVisible: Math.max(2, Math.min(8, Math.max(1, ui.stackEntries.length)))
+                    readonly property int headerH: 42
+                    readonly property int bodyH: ui.stackEntries.length === 0 ? 110 : (isList ? listRowsVisible * 34 : rowsVisible * cellH)
+                    width: isList ? 320 : (cols * cellW + 24)
+                    height: headerH + bodyH + 16
+                    x: Math.max(8, Math.min(ui.width - width - 8, ui.stackCx - width / 2))
+                    y: Math.max(8, ui.height - root.margin - root.bgHeight - root.iconSize * (root.effMag - 1) - 14 - height)
+                    radius: 16
+                    color: Qt.rgba(0.11, 0.11, 0.13, 0.88)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.16)
+
+                    MouseArea { anchors.fill: parent; z: -1 }
+
+                    // Header bar: folder name + count + Grid/List toggle + Open in Files
+                    Item {
+                        id: stackHead
+                        x: 12; y: 6
+                        width: parent.width - 24
+                        height: 32
+                        Text {
+                            anchors.left: parent.left
+                            anchors.right: stackHeadBtns.left
+                            anchors.rightMargin: 8
+                            anchors.verticalCenter: parent.verticalCenter
+                            elide: Text.ElideRight
+                            text: ui.stackItem ? (ui.stackItem.name + (ui.stackTotal > 0 ? "  \u00B7  " + ui.stackTotal : "")) : ""
+                            color: "white"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            font.family: root.fontForWeight(Font.DemiBold, root.fontFamily)
+                        }
+                        Row {
+                            id: stackHeadBtns
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: 6
+                            Rectangle {
+                                width: viewLbl.implicitWidth + 14; height: 22; radius: 6
+                                color: viewMa.containsMouse ? Qt.rgba(1, 1, 1, 0.20) : Qt.rgba(1, 1, 1, 0.10)
+                                Text {
+                                    id: viewLbl
+                                    anchors.centerIn: parent
+                                    text: stackPop.isList ? I18n.tr("List") : I18n.tr("Grid")
+                                    color: Qt.rgba(1, 1, 1, 0.9)
+                                    font.pixelSize: 11
+                                    font.family: root.fontForWeight(Font.Normal, root.fontFamily)
+                                }
+                                MouseArea {
+                                    id: viewMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: if (ui.stackItem) root.setFolderOpt(ui.stackItem.path, "view", stackPop.isList ? "grid" : "list")
+                                }
+                            }
+                            Rectangle {
+                                width: openLbl.implicitWidth + 14; height: 22; radius: 6
+                                color: openMa.containsMouse ? root.accent : Qt.rgba(1, 1, 1, 0.12)
+                                Text {
+                                    id: openLbl
+                                    anchors.centerIn: parent
+                                    text: I18n.tr("Open") + " \u2197"
+                                    color: "white"
+                                    font.pixelSize: 11
+                                    font.weight: Font.Medium
+                                    font.family: root.fontForWeight(Font.Medium, root.fontFamily)
+                                }
+                                MouseArea {
+                                    id: openMa; anchors.fill: parent; hoverEnabled: true
+                                    onClicked: {
+                                        var p = ui.stackItem ? ui.stackItem.path : "";
+                                        ui.stackItem = null;
+                                        if (p !== "") Quickshell.execDetached(["xdg-open", p]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { x: 12; y: stackPop.headerH - 2; width: parent.width - 24; height: 1; color: Qt.rgba(1, 1, 1, 0.10) }
+
+                    Text {
+                        visible: ui.stackEntries.length === 0
+                        anchors.centerIn: parent
+                        anchors.verticalCenterOffset: stackPop.headerH / 2 - 4
+                        text: ui.stackLoading ? I18n.tr("Loading\u2026") : I18n.tr("Folder is empty")
+                        color: Qt.rgba(1, 1, 1, 0.55)
+                        font.pixelSize: 13
+                        font.family: root.fontForWeight(Font.Normal, root.fontFamily)
+                    }
+
+                    GridView {
+                        id: stackGrid
+                        visible: !stackPop.isList && ui.stackEntries.length > 0
+                        x: 12; y: stackPop.headerH + 4
+                        width: parent.width - 24
+                        height: stackPop.bodyH
+                        cellWidth: stackPop.cellW
+                        cellHeight: stackPop.cellH
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: ui.stackEntries
+                        delegate: Item {
+                            id: sgCell
+                            required property var modelData
+                            width: stackPop.cellW; height: stackPop.cellH
+                            Rectangle {
+                                anchors.fill: parent; anchors.margins: 3; radius: 10
+                                color: sgMa.containsMouse ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
+                            }
+                            Image {
+                                x: (parent.width - width) / 2; y: 10
+                                width: 46; height: 46
+                                source: root.stackEntryIconSrc(sgCell.modelData)
+                                sourceSize: Qt.size(96, 96)
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true; smooth: true; mipmap: true
+                            }
+                            Text {
+                                x: 6; y: 60
+                                width: parent.width - 12
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideMiddle
+                                maximumLineCount: 2
+                                wrapMode: Text.WrapAnywhere
+                                text: sgCell.modelData ? sgCell.modelData.name : ""
+                                color: "white"
+                                font.pixelSize: 11
+                                font.family: root.fontForWeight(Font.Normal, root.fontFamily)
+                            }
+                            MouseArea {
+                                id: sgMa; anchors.fill: parent; hoverEnabled: true
+                                onClicked: {
+                                    var p = sgCell.modelData ? sgCell.modelData.path : "";
+                                    ui.stackItem = null;
+                                    if (p !== "") Quickshell.execDetached(["xdg-open", p]);
+                                }
+                            }
+                        }
+                    }
+
+                    ListView {
+                        id: stackList
+                        visible: stackPop.isList && ui.stackEntries.length > 0
+                        x: 8; y: stackPop.headerH + 4
+                        width: parent.width - 16
+                        height: stackPop.bodyH
+                        clip: true
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: ui.stackEntries
+                        delegate: Item {
+                            id: slRow
+                            required property var modelData
+                            width: stackList.width; height: 34
+                            Rectangle {
+                                anchors.fill: parent; radius: 7
+                                color: slMa.containsMouse ? root.accent : "transparent"
+                            }
+                            Image {
+                                x: 8; anchors.verticalCenter: parent.verticalCenter
+                                width: 20; height: 20
+                                source: root.stackEntryIconSrc(slRow.modelData)
+                                sourceSize: Qt.size(48, 48)
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true; smooth: true
+                            }
+                            Text {
+                                x: 34; anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - 44
+                                elide: Text.ElideMiddle
+                                text: slRow.modelData ? slRow.modelData.name : ""
+                                color: "white"
+                                font.pixelSize: 13
+                                font.family: root.fontForWeight(Font.Normal, root.fontFamily)
+                            }
+                            MouseArea {
+                                id: slMa; anchors.fill: parent; hoverEnabled: true
+                                onClicked: {
+                                    var p = slRow.modelData ? slRow.modelData.path : "";
+                                    ui.stackItem = null;
+                                    if (p !== "") Quickshell.execDetached(["xdg-open", p]);
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Rectangle {

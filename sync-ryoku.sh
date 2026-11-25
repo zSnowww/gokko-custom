@@ -5,7 +5,12 @@ set -euo pipefail
 # upstream Store updates to "gokko" never overwrite this repository or its edits.
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+DATA_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/ryoku"
 STATE_ROOT="${XDG_STATE_HOME:-$HOME/.local/state}/ryoku/store"
+BARSTYLE_DATA="$DATA_ROOT/barstyles/gokko"
+LAUNCHER_DATA="$DATA_ROOT/launchers/gokko"
+BARSTYLE_RECEIPT="$STATE_ROOT/barstyles/gokko.json"
+LAUNCHER_RECEIPT="$STATE_ROOT/launchers/gokko.json"
 VIEW_TAG="zsnow-gokko-custom"
 VIEW_HASH="$(printf '%s' "$VIEW_TAG" | sha256sum | cut -d' ' -f1)"
 VIEW_DIR="$STATE_ROOT/barstyle-views/gokko/$VIEW_HASH"
@@ -59,28 +64,104 @@ if [[ -n "$QSB_BIN" ]]; then
 fi
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/macbar/"*.qsb "${XDG_CONFIG_HOME:-$HOME/.config}/macdock/"*.qsb
 
-mkdir -p "$VIEW_DIR" "$LAUNCHER_DIR"
-rsync -a --delete --exclude='*.qmlc' \
-    "$ROOT/LICENSE" \
-    "$ROOT/NOTICE.md" \
-    "$ROOT/PROVENANCE.txt" \
-    "$ROOT/README.md" \
-    "$ROOT/Scene.qml" \
-    "$ROOT/VERSION" \
-    "$ROOT/upstream" \
-    "$VIEW_DIR/"
+if command -v ryostore >/dev/null 2>&1; then
+    mkdir -p "$BARSTYLE_DATA" "$LAUNCHER_DATA" "$(dirname "$BARSTYLE_RECEIPT")" "$(dirname "$LAUNCHER_RECEIPT")"
+    rsync -a --delete --exclude='*.qmlc' \
+        "$ROOT/LICENSE" \
+        "$ROOT/NOTICE.md" \
+        "$ROOT/PROVENANCE.txt" \
+        "$ROOT/README.md" \
+        "$ROOT/Scene.qml" \
+        "$ROOT/VERSION" \
+        "$ROOT/upstream" \
+        "$BARSTYLE_DATA/"
 
-rsync -a --delete --exclude='*.qmlc' \
-    "$ROOT/LICENSE" \
-    "$ROOT/NOTICE.md" \
-    "$ROOT/PROVENANCE.txt" \
-    "$ROOT/README.md" \
-    "$ROOT/VERSION" \
-    "$ROOT/upstream" \
-    "$LAUNCHER_DIR/"
-cp "$ROOT/LauncherMain.qml" "$LAUNCHER_DIR/Main.qml"
+    rsync -a --delete --exclude='*.qmlc' \
+        "$ROOT/LICENSE" \
+        "$ROOT/NOTICE.md" \
+        "$ROOT/PROVENANCE.txt" \
+        "$ROOT/README.md" \
+        "$ROOT/VERSION" \
+        "$ROOT/upstream" \
+        "$LAUNCHER_DATA/"
+    cp "$ROOT/LauncherMain.qml" "$LAUNCHER_DATA/Main.qml"
 
-python3 - "$INDEX_FILE" "$VERSION" "barstyle-views/gokko/$VIEW_HASH" "$LAUNCHER_INDEX" "launcher-views/gokko/$LAUNCHER_HASH" << 'PY'
+    python3 - "$VERSION" "$BARSTYLE_DATA" "$BARSTYLE_RECEIPT" "$LAUNCHER_DATA" "$LAUNCHER_RECEIPT" << 'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+import tempfile
+
+version, bar_data, bar_receipt, launcher_data, launcher_receipt = sys.argv[1:]
+
+def write_receipt(dest_dir, receipt_path, category, ver, dest_rel):
+    files = []
+    for root_dir, dirs, names in os.walk(dest_dir):
+        dirs.sort()
+        names.sort()
+        for name in names:
+            full = os.path.join(root_dir, name)
+            rel = os.path.relpath(full, dest_dir).replace(os.sep, "/")
+            with open(full, "rb") as f:
+                data = f.read()
+            st = os.stat(full)
+            files.append({
+                "source": rel,
+                "destination": rel,
+                "sha256": hashlib.sha256(data).hexdigest(),
+                "mode": format(stat.S_IMODE(st.st_mode), "04o"),
+                "size": st.st_size,
+            })
+    receipt = {
+        "category": category,
+        "id": "gokko",
+        "version": ver,
+        "destination": dest_rel,
+        "files": files,
+    }
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(receipt_path), prefix=".receipt.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(receipt, f, separators=(",", ":"))
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, receipt_path)
+    except Exception:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+write_receipt(bar_data, bar_receipt, "barstyles", version, "ryoku/barstyles/gokko")
+write_receipt(launcher_data, launcher_receipt, "launchers", version, "ryoku/launchers/gokko")
+PY
+
+    ryostore catalog --category barstyles >/dev/null
+    ryostore catalog --category launchers >/dev/null
+    echo "Installed custom Gokko ($VERSION) via ryostore receipts ($BARSTYLE_DATA + $LAUNCHER_DATA)"
+else
+    mkdir -p "$VIEW_DIR" "$LAUNCHER_DIR"
+    rsync -a --delete --exclude='*.qmlc' \
+        "$ROOT/LICENSE" \
+        "$ROOT/NOTICE.md" \
+        "$ROOT/PROVENANCE.txt" \
+        "$ROOT/README.md" \
+        "$ROOT/Scene.qml" \
+        "$ROOT/VERSION" \
+        "$ROOT/upstream" \
+        "$VIEW_DIR/"
+
+    rsync -a --delete --exclude='*.qmlc' \
+        "$ROOT/LICENSE" \
+        "$ROOT/NOTICE.md" \
+        "$ROOT/PROVENANCE.txt" \
+        "$ROOT/README.md" \
+        "$ROOT/VERSION" \
+        "$ROOT/upstream" \
+        "$LAUNCHER_DIR/"
+    cp "$ROOT/LauncherMain.qml" "$LAUNCHER_DIR/Main.qml"
+
+    python3 - "$INDEX_FILE" "$VERSION" "barstyle-views/gokko/$VIEW_HASH" "$LAUNCHER_INDEX" "launcher-views/gokko/$LAUNCHER_HASH" << 'PY'
 import json
 import os
 import sys
@@ -125,7 +206,8 @@ update_index(index_path, {"scene": "Scene.qml", "view": view_rel})
 update_index(launcher_index_path, {"view": launcher_view_rel})
 PY
 
-echo "Installed custom Gokko ($VERSION) -> $VIEW_DIR + $LAUNCHER_DIR"
+    echo "Installed custom Gokko ($VERSION) -> $VIEW_DIR + $LAUNCHER_DIR"
+fi
 
 if [[ "$DO_RELOAD" -eq 1 ]] && command -v ryoku-shell >/dev/null 2>&1; then
     echo "Reloading ryoku-shell..."
