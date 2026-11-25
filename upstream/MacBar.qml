@@ -277,6 +277,7 @@ Scope {
     property bool gamingAutoActive: false
     readonly property bool gaming: gamingMode || gamingAutoActive
     property bool ccMigGame: false            // one-time: add the Game Mode tile to an existing Control Center layout
+    property bool ccMigPods: false            // one-time: add the AirPods tile to an existing Control Center layout
     property bool barGlass: true              // the bar strip itself is Liquid Glass (needs barStyle "liquid")
     property real barBgOpacity: 0.10          // fill of the separate "macbarbg" layer (0 = layer hidden). Must stay above the layerrule's ignore_alpha (0.05) for Hyprland to blur it
     property bool glassRealtime: false        // live-capture every window all the time; off by default now that popovers refract a screen snapshot       // keep every window capture live all the time (no wallpaper-first delay when a popover opens)
@@ -334,7 +335,7 @@ Scope {
         "barStyle", "barGlass", "glassRim", "glassGrain", "glassLiquid", "glassBlur", "barBgOpacity", "glassRealtime", "liveWallGlass", "glassDebug", "wallpaperPath", "use24h", "language", "showDate",
         "showSeconds", "showBatteryPercent", "showTray", "showSearch",
         "spotlightEnabled", "ccEnabled", "notificationsEnabled", "clockAppEnabled", "ccStyle", "barLogoMode", "barCustomLogoPath", "barWidgets", "weekStartsMonday", "terminal", "launcher",
-        "filesCmd", "clipboardCmd", "appUsage", "clipHistory", "clipAutoPaste", "emojiRecent", "screenshotDir", "screenshotSave", "screenshotClipboard", "screenshotNotify", "ccControls", "ccPos", "ccSizes", "ccMigRec", "wallpaperDir", "wallpaperFavs", "wallpaperCmd", "wallpaperVideo", "wpRestorePath", "uiSounds", "gamingMode", "gamingAuto", "ccMigGame", "lockArtBackground",
+        "filesCmd", "clipboardCmd", "appUsage", "clipHistory", "clipAutoPaste", "emojiRecent", "screenshotDir", "screenshotSave", "screenshotClipboard", "screenshotNotify", "ccControls", "ccPos", "ccSizes", "ccMigRec", "ccMigPods", "podsCacheLeft", "podsCacheRight", "podsCacheCase", "podsCacheAt", "podsAutoPopup", "wallpaperDir", "wallpaperFavs", "wallpaperCmd", "wallpaperVideo", "wpRestorePath", "uiSounds", "gamingMode", "gamingAuto", "ccMigGame", "lockArtBackground",
         "lockClockStyle", "switcherStyle", "lockClockFont", "lockClockWeight", "lockClockMaterial", "lockClockIntensity", "lockClockTint", "lockClockDate", "autoContrast", "wallpaperAppearance", "wpPairLight", "wpPairDark",
         "notifDnd", "dnd", "keepAwake",
         "kbRepeatRate", "kbRepeatDelay", "mouseSens", "mouseNatural", "tpNatural", "tpTap", "tpDwt", "tpScroll"]
@@ -371,6 +372,7 @@ Scope {
     readonly property var ccCatalog: [
         { id: "wifi",       label: I18n.tr("Wi-Fi"),            glyph: "wifi",       w: 2, h: 1, sizes: ccBtnSizes },
         { id: "bluetooth",  label: I18n.tr("Bluetooth"),        glyph: "bluetooth",  w: 2, h: 1, sizes: ccBtnSizes },
+        { id: "airpods",    label: I18n.tr("AirPods"),          glyph: "airpods",    w: 2, h: 1, sizes: ccBtnSizes },
         { id: "airplane",   label: I18n.tr("Airplane Mode"),    glyph: "airplane",   w: 1, h: 1, sizes: ccBtnSizes },
         { id: "focus",      label: I18n.tr("Focus"),            glyph: "moon",       w: 2, h: 1, sizes: ccBtnSizes },
         { id: "nightshift", label: I18n.tr("Night Shift"),      glyph: "nightshift", w: 1, h: 1, sizes: ccBtnSizes },
@@ -382,7 +384,7 @@ Scope {
         { id: "display",    label: I18n.tr("Display"),          glyph: "sun",        w: 4, h: 1, sizes: [[2, 1], [4, 1]] },
         { id: "sound",      label: I18n.tr("Sound"),            glyph: "speaker",    w: 4, h: 1, sizes: [[2, 1], [4, 1]] }
     ]
-    readonly property var ccDefault: ["wifi", "nowplaying", "bluetooth", "airplane", "focus", "record", "nightshift", "keepawake", "display", "sound"]
+    readonly property var ccDefault: ["wifi", "nowplaying", "bluetooth", "airpods", "airplane", "focus", "record", "nightshift", "keepawake", "display", "sound"]
     function ccDef(id) {
         for (var i = 0; i < ccCatalog.length; i++) {
             var b = ccCatalog[i];
@@ -1007,6 +1009,32 @@ Scope {
                     line(9 + Math.cos(g2) * 5.6, 9 + Math.sin(g2) * 5.6, 9 + Math.cos(g2) * 7.6, 9 + Math.sin(g2) * 7.6);
                 }
                 circ(9, 9, 5.6); ctx.stroke();
+            } else if (k === "airpods") {
+                // Paired earbuds silhouettes (left & right stems)
+                ctx.lineWidth = 1.4;
+                rrect(2.3, 3.2, 4.8, 5.2, 2.4); ctx.fill();
+                rrect(10.9, 3.2, 4.8, 5.2, 2.4); ctx.fill();
+                line(5.4, 7.8, 6.2, 15.2);
+                line(12.6, 7.8, 11.8, 15.2);
+            } else if (k === "noise_off") {
+                circ(9, 9, 5.8); ctx.stroke();
+                circ(9, 9, 1.9); ctx.fill();
+            } else if (k === "anc") {
+                circ(9, 9, 6.4); ctx.stroke();
+                circ(9, 9, 3.1); ctx.fill();
+            } else if (k === "transparency") {
+                circ(9, 9, 2.7); ctx.stroke();
+                ctx.beginPath(); ctx.arc(9, 9, 6.2, -0.45 * PI, 0.45 * PI, false); ctx.stroke();
+                ctx.beginPath(); ctx.arc(9, 9, 6.2, 0.55 * PI, 1.45 * PI, false); ctx.stroke();
+            } else if (k === "adaptive") {
+                circ(9, 9, 2.6); ctx.fill();
+                ctx.beginPath(); ctx.arc(9, 9, 6.2, 0.42 * PI, 1.38 * PI, false); ctx.stroke();
+                ctx.beginPath(); ctx.arc(9, 9, 6.2, -0.32 * PI, 0.25 * PI, false); ctx.stroke();
+                line(13.8, 2.4, 13.8, 5.6);
+                line(12.2, 4.0, 15.4, 4.0);
+            } else if (k === "pencil") {
+                poly([3.2, 14.8, 4.0, 11.4, 12.2, 3.2, 14.8, 5.8, 6.6, 14.0], false);
+                line(10.6, 4.8, 13.2, 7.4);
             } else if (k.indexOf("m_") === 0) {
                 // ── Apple-menu icons (drawn after the macOS ones; 18x18 grid, 1.5 px strokes) ──
                 ctx.lineWidth = 1.4;
@@ -2311,7 +2339,13 @@ Scope {
         }
         return best;
     }
-    onPlayerChanged: if (player && player.isPlaying) lastPlayerDbus = playerKey(player)
+    onPlayerChanged: {
+        var cur = player;
+        if (cur && cur.isPlaying) {
+            var k = playerKey(cur);
+            if (k !== "" && k !== lastPlayerDbus) Qt.callLater(function () { root.lastPlayerDbus = k; });
+        }
+    }
     function mediaToggle(pl) {
         if (!pl) return;
         var k = playerKey(pl);
@@ -2719,6 +2753,495 @@ Scope {
                       : "bluetoothctl power off"]);
         settleTimer.interval = 1500;
         settleTimer.restart();
+    }
+
+    // ═════════════ PODCTL (AIRPODS DAEMON + PASSIVE BLE) ═════════════
+    property bool podsDaemonUp: false
+    property bool podsKnown: false
+    property bool podsConnected: false
+    property bool podsAapLinked: false
+    property string podsAddress: ""
+    property string podsName: "AirPods"
+    property string podsModel: ""
+    property int podsBatLeft: -1
+    property int podsBatRight: -1
+    property int podsBatCase: -1
+    property bool podsChgLeft: false
+    property bool podsChgRight: false
+    property bool podsChgCase: false
+    property int podsBleLeft: -1
+    property int podsBleRight: -1
+    property int podsBleCase: -1
+    property bool podsBleChgLeft: false
+    property bool podsBleChgRight: false
+    property bool podsBleChgCase: false
+    property double podsBleAt: 0
+    property int podsCacheLeft: -1
+    property int podsCacheRight: -1
+    property int podsCacheCase: -1
+    property double podsCacheAt: 0
+    property double podsNowSec: 0
+    property string podsEarLeft: ""
+    property string podsEarRight: ""
+    property string podsMode: "off"          // off | anc | transparency | adaptive
+    property bool podsConvAware: false
+    property bool podsEarDetect: false
+    property bool podsOneBudAnc: false
+    property string podsAutoAnc: "default"   // less-noise | default | more-noise
+    property string podsMic: "auto"          // auto | left | right
+    property int podsChime: -1               // 0..100 or -1 unknown
+    property string podsProfile: "high"      // high | headset | off
+    property string podsCodec: ""
+    property var podsCodecs: []
+    property bool podsIsDefaultSink: false
+    property int podsLatency: 0
+    property bool podsAutoConnect: true
+    property bool podsAutoPopup: true
+    property double podsConnectedAtMs: 0
+    property double podsLastAutoPopupMs: 0
+    property bool podsBleLidKnown: false
+    property bool podsBleLidOpen: false
+    property bool podsHasAnc: true
+    property bool podsHasTransp: true
+    property bool podsHasAdaptive: true
+    property bool podsHasConv: true
+    property bool podsHasCaseBat: true
+    property bool podsBusy: false
+    property string podsError: ""
+    property var podsCmdQueue: []
+
+    readonly property bool podsBleFresh: podsBleAt > 0 && ((podsNowSec > 0 ? podsNowSec : Date.now() / 1000) - podsBleAt) < 300
+    readonly property bool podsBleChgFresh: podsBleAt > 0 && ((podsNowSec > 0 ? podsNowSec : Date.now() / 1000) - podsBleAt) < 120
+    readonly property string podsBatSource: (podsConnected && (podsBatLeft >= 0 || podsBatRight >= 0 || podsBatCase >= 0))
+        ? "aap"
+        : (podsBleFresh && (podsBleLeft >= 0 || podsBleRight >= 0 || podsBleCase >= 0) ? "ble"
+           : (podsCacheLeft >= 0 || podsCacheRight >= 0 || podsCacheCase >= 0 ? "cache" : ""))
+    readonly property int podsShowLeft: podsBatSource === "aap" ? podsBatLeft
+        : (podsBatSource === "ble" ? (podsBleLeft >= 0 ? podsBleLeft : podsCacheLeft) : podsCacheLeft)
+    readonly property int podsShowRight: podsBatSource === "aap" ? podsBatRight
+        : (podsBatSource === "ble" ? (podsBleRight >= 0 ? podsBleRight : podsCacheRight) : podsCacheRight)
+    readonly property int podsShowCase: podsBatSource === "aap"
+        ? (podsBatCase >= 0 ? podsBatCase : (podsBleFresh ? podsBleCase : podsCacheCase))
+        : (podsBatSource === "ble" ? (podsBleCase >= 0 ? podsBleCase : podsCacheCase) : podsCacheCase)
+    readonly property bool podsShowChgLeft: podsBatSource === "aap" ? podsChgLeft : (podsBatSource === "ble" && podsBleChgLeft)
+    readonly property bool podsShowChgRight: podsBatSource === "aap" ? podsChgRight : (podsBatSource === "ble" && podsBleChgRight)
+    readonly property bool podsShowChgCase: podsBatSource === "aap"
+        ? (podsChgCase || (podsBleChgFresh && podsBleChgCase))
+        : (podsBatSource === "ble" && podsBleChgCase)
+
+    function podsModeLabel(m, shortForm) {
+        if (m === "anc") return shortForm ? I18n.tr("ANC") : I18n.tr("Noise Cancellation");
+        if (m === "transparency") return shortForm ? I18n.tr("Transp.") : I18n.tr("Transparency");
+        if (m === "adaptive") return shortForm ? I18n.tr("Adaptive") : I18n.tr("Adaptive Audio");
+        return I18n.tr("Off");
+    }
+    function podsEarLabel(s) {
+        if (s === "in_ear") return I18n.tr("In Ear");
+        if (s === "in_case") return I18n.tr("In Case");
+        if (s === "out" || s === "not_in_ear") return I18n.tr("Out");
+        return "";
+    }
+    function podsModelLabel(m) {
+        var map = {
+            "pro3": "AirPods Pro 3",
+            "pro2_usbc": "AirPods Pro 2 (USB-C)",
+            "pro2": "AirPods Pro 2",
+            "pro": "AirPods Pro",
+            "airpods4_anc": "AirPods 4 (ANC)",
+            "airpods4": "AirPods 4",
+            "airpods3": "AirPods (3rd gen)",
+            "airpods2": "AirPods (2nd gen)",
+            "airpods1": "AirPods",
+            "max_usbc": "AirPods Max (USB-C)",
+            "max": "AirPods Max"
+        };
+        if (root.podsModel !== "" && map[root.podsModel]) return map[root.podsModel];
+        return root.podsModel;
+    }
+    function podsBatAgeLabel() {
+        if (podsBatSource === "aap") return podsBleChgFresh && podsBleChgCase && !podsChgCase ? I18n.tr("Case BLE live") : "";
+        if (podsBatSource === "ble") return I18n.tr("BLE live");
+        if (podsBatSource === "cache" && podsCacheAt > 0) {
+            var nowS = podsNowSec > 0 ? podsNowSec : (Date.now() / 1000);
+            var mins = Math.max(1, Math.round((nowS - podsCacheAt) / 60));
+            if (mins < 60) return I18n.tr("Last seen ") + mins + "m";
+            var hrs = Math.round(mins / 60);
+            return I18n.tr("Last seen ") + hrs + "h";
+        }
+        return "";
+    }
+    function podsBatSummary(includeCase) {
+        var parts = [];
+        if (root.podsShowLeft >= 0) parts.push("L " + root.podsShowLeft + "%" + (root.podsShowChgLeft ? "⚡" : ""));
+        if (root.podsShowRight >= 0) parts.push("R " + root.podsShowRight + "%" + (root.podsShowChgRight ? "⚡" : ""));
+        if (includeCase && root.podsHasCaseBat && root.podsShowCase >= 0)
+            parts.push("C " + root.podsShowCase + "%" + (root.podsShowChgCase ? "⚡" : ""));
+        return parts.join(" · ");
+    }
+    function podsTileSubtitle() {
+        if (!root.podsDaemonUp && root.podsBatSource !== "ble") return I18n.tr("Daemon Off");
+        if (!root.podsConnected) {
+            if (root.podsBatSource === "ble") {
+                var b = podsBatSummary(true);
+                return b !== "" ? ("BLE · " + b) : I18n.tr("Case Nearby");
+            }
+            if (root.podsBatSource === "cache" && root.podsShowCase >= 0)
+                return I18n.tr("Not Connected") + " · C " + root.podsShowCase + "%";
+            return root.podsKnown ? I18n.tr("Not Connected") : I18n.tr("No AirPods Paired");
+        }
+        var bat = podsBatSummary(root.podsShowChgCase);
+        var modeTxt = podsModeLabel(root.podsMode, true);
+        return bat !== "" ? (modeTxt + " · " + bat) : modeTxt;
+    }
+    function _podBool(v) {
+        return v === true || v === "on" || v === "true" || v === 1;
+    }
+    function _podBatVal(v) {
+        return (v === null || v === undefined || isNaN(Number(v)) || Number(v) < 0) ? -1 : Math.round(Number(v));
+    }
+    function _savePodsCache(nl, nr, nc, forceSave) {
+        var chg = Math.abs(nl - root.podsCacheLeft) >= 5
+               || Math.abs(nr - root.podsCacheRight) >= 5
+               || Math.abs(nc - root.podsCacheCase) >= 5
+               || (root.podsCacheAt <= 0 && (nl >= 0 || nr >= 0 || nc >= 0));
+        if (nl >= 0) root.podsCacheLeft = nl;
+        if (nr >= 0) root.podsCacheRight = nr;
+        if (nc >= 0) root.podsCacheCase = nc;
+        if (nl >= 0 || nr >= 0 || nc >= 0) root.podsCacheAt = Math.round(Date.now() / 1000);
+        if (forceSave || chg) root.podsNowSec = Date.now() / 1000;
+    }
+    function applyPodStateData(d) {
+        if (!d) return;
+        root.podsDaemonUp = true;
+        if (d.address) {
+            root.podsKnown = true;
+            root.podsAddress = String(d.address);
+        }
+        if (d.name) root.podsName = String(d.name);
+        var wasConn = root.podsConnected;
+        root.podsConnected = !!d.connected;
+        if (root.podsConnected && (!wasConn || root.podsConnectedAtMs <= 0))
+            root.podsConnectedAtMs = Date.now();
+        else if (!root.podsConnected)
+            root.podsConnectedAtMs = 0;
+        root.podsAapLinked = !!d.aap_linked;
+        if (d.capabilities) {
+            var c = d.capabilities;
+            if (c.model) root.podsModel = String(c.model);
+            if (c.has_anc !== undefined) root.podsHasAnc = !!c.has_anc;
+            if (c.has_transparency !== undefined) root.podsHasTransp = !!c.has_transparency;
+            if (c.has_adaptive !== undefined) root.podsHasAdaptive = !!c.has_adaptive;
+            if (c.has_conv_awareness !== undefined) root.podsHasConv = !!c.has_conv_awareness;
+            if (c.has_case_battery !== undefined) root.podsHasCaseBat = !!c.has_case_battery;
+        }
+        if (d.battery) {
+            var b = d.battery;
+            root.podsBatLeft = _podBatVal(b.left);
+            root.podsBatRight = _podBatVal(b.right);
+            root.podsBatCase = _podBatVal(b.case);
+            root.podsChgLeft = !!b.left_charging;
+            root.podsChgRight = !!b.right_charging;
+            root.podsChgCase = !!b.case_charging;
+            if (root.podsBatLeft >= 0 || root.podsBatRight >= 0 || root.podsBatCase >= 0)
+                _savePodsCache(root.podsBatLeft, root.podsBatRight, root.podsBatCase, wasConn && !root.podsConnected);
+        }
+        if (d.in_ear) {
+            root.podsEarLeft = String(d.in_ear.primary || "");
+            root.podsEarRight = String(d.in_ear.secondary || "");
+        }
+        if (d.settings) {
+            var s = d.settings;
+            if (s.mode) root.podsMode = String(s.mode);
+            if (s.conv_awareness !== undefined && s.conv_awareness !== null) root.podsConvAware = _podBool(s.conv_awareness);
+            if (s.ear_detection !== undefined && s.ear_detection !== null) root.podsEarDetect = _podBool(s.ear_detection);
+            if (s.one_bud_anc !== undefined && s.one_bud_anc !== null) root.podsOneBudAnc = _podBool(s.one_bud_anc);
+            if (s.auto_anc_level) root.podsAutoAnc = String(s.auto_anc_level);
+            if (s.mic_selection) root.podsMic = String(s.mic_selection);
+            if (s.chime_volume !== undefined && s.chime_volume !== null && !isNaN(Number(s.chime_volume)))
+                root.podsChime = Math.round(Number(s.chime_volume));
+        }
+        if (d.audio) {
+            var a = d.audio;
+            if (a.profile) root.podsProfile = String(a.profile);
+            if (a.codec) root.podsCodec = String(a.codec);
+            if (Array.isArray(a.available_codecs)) root.podsCodecs = a.available_codecs.slice();
+            if (a.is_default_sink !== undefined) root.podsIsDefaultSink = !!a.is_default_sink;
+            if (a.latency_offset_ms !== undefined && a.latency_offset_ms !== null && !isNaN(Number(a.latency_offset_ms)))
+                root.podsLatency = Math.round(Number(a.latency_offset_ms));
+        }
+        if (d.bluetooth && d.bluetooth.auto_connect !== undefined)
+            root.podsAutoConnect = !!d.bluetooth.auto_connect;
+    }
+    function applyPodListData(arr) {
+        if (!Array.isArray(arr) || arr.length === 0) {
+            if (!root.podsConnected) { root.podsKnown = false; root.podsAddress = ""; }
+            return;
+        }
+        var pick = arr[0];
+        for (var i = 0; i < arr.length; i++) if (arr[i].connected) { pick = arr[i]; break; }
+        root.podsKnown = true;
+        if (pick.address) root.podsAddress = String(pick.address);
+        if (pick.name) root.podsName = String(pick.name);
+        if (pick.model && root.podsModel === "") root.podsModel = String(pick.model);
+        if (pick.trusted !== undefined) root.podsAutoConnect = !!pick.trusted;
+        if (!root.podsConnected && pick.connected) root.podsConnected = true;
+    }
+    function maybeTriggerPodsPopup() {
+        if (!root.podsAutoPopup || !root.podsDaemonUp || root.launcherOnly) return;
+        var now = Date.now();
+        if (root.podsConnectedAtMs > 0 && (now - root.podsConnectedAtMs) < 6000) return;
+        if (now - root.podsLastAutoPopupMs < 10000) return;
+        root.podsLastAutoPopupMs = now;
+        Quickshell.execDetached(["podctl", "popup"]);
+    }
+    function parsePodBleLine(line) {
+        var s = String(line || "").trim();
+        if (s === "" || s.charAt(0) !== "{") return;
+        try {
+            var obj = JSON.parse(s);
+            if (!obj || obj.kind !== "ble") return;
+            if (root.podsAddress !== "" && obj.address && String(obj.address).toUpperCase() !== root.podsAddress.toUpperCase()) return;
+            root.podsBleLeft = _podBatVal(obj.left);
+            root.podsBleRight = _podBatVal(obj.right);
+            root.podsBleCase = _podBatVal(obj.case);
+            root.podsBleChgLeft = !!obj.left_charging;
+            root.podsBleChgRight = !!obj.right_charging;
+            root.podsBleChgCase = !!obj.case_charging;
+            root.podsBleAt = Date.now() / 1000;
+            root.podsNowSec = root.podsBleAt;
+            if (obj.lid_open !== undefined) {
+                var lidNow = !!obj.lid_open;
+                if (root.podsBleLidKnown && !root.podsBleLidOpen && lidNow) maybeTriggerPodsPopup();
+                root.podsBleLidOpen = lidNow;
+                root.podsBleLidKnown = true;
+            }
+            if (!root.podsConnected && (root.podsBleLeft >= 0 || root.podsBleRight >= 0 || root.podsBleCase >= 0))
+                _savePodsCache(root.podsBleLeft, root.podsBleRight, root.podsBleCase, false);
+        } catch (e) { }
+    }
+    function parsePodStreamLine(line) {
+        var s = String(line || "").trim();
+        if (s === "" || s.charAt(0) !== "{") return;
+        try {
+            var obj = JSON.parse(s);
+            if (!obj || !obj.ok) return;
+            if (obj.kind === "state") {
+                applyPodStateData(obj.data);
+            } else if (obj.kind === "list") {
+                applyPodListData(obj.data);
+            } else if (obj.kind === "event" && obj.data) {
+                root.podsDaemonUp = true;
+                var ev = obj.data;
+                if (ev.mode) root.podsMode = String(ev.mode);
+                if (ev.conv_awareness !== undefined) root.podsConvAware = _podBool(ev.conv_awareness);
+                if (ev.connected !== undefined) {
+                    var wasConn = root.podsConnected;
+                    root.podsConnected = !!ev.connected;
+                    if (root.podsConnected && !wasConn) root.podsConnectedAtMs = Date.now();
+                    else if (!root.podsConnected) root.podsConnectedAtMs = 0;
+                }
+                if (ev.event === "case_lid" && (ev.open === true || ev.case_lid_open === true || ev.lid_open === true)) {
+                    maybeTriggerPodsPopup();
+                } else if (ev.event === "battery") {
+                    var nlChg = !!ev.left_charging, nrChg = !!ev.right_charging;
+                    if (root.podsConnected && ((!root.podsChgLeft && nlChg) || (!root.podsChgRight && nrChg)))
+                        maybeTriggerPodsPopup();
+                    root.podsChgLeft = nlChg;
+                    root.podsChgRight = nrChg;
+                    if (ev.case_charging !== undefined) root.podsChgCase = !!ev.case_charging;
+                } else if (ev.event === "in_ear") {
+                    if ((ev.primary === "in_case" && root.podsEarLeft !== "in_case")
+                        || (ev.secondary === "in_case" && root.podsEarRight !== "in_case"))
+                        maybeTriggerPodsPopup();
+                }
+                podsRefreshDebounce.restart();
+            }
+        } catch (e) { }
+    }
+    function refreshPods() {
+        if (root.launcherOnly) return;
+        root.podsNowSec = Date.now() / 1000;
+        if (!podStatusProc.running) podStatusProc.running = true;
+        if (!podWatchProc.running) podWatchProc.running = true;
+        if (root.podsKnown && !podBleProc.running) podBleProc.running = true;
+    }
+    function runPodCmd(args) {
+        if (!args || args.length === 0) return;
+        root.podsError = "";
+        var q = root.podsCmdQueue.slice();
+        q.push(args);
+        root.podsCmdQueue = q;
+        _pumpPodCmd();
+    }
+    function _pumpPodCmd() {
+        if (podCmdProc.running || root.podsCmdQueue.length === 0) return;
+        var q = root.podsCmdQueue.slice();
+        var next = q.shift();
+        root.podsCmdQueue = q;
+        root.podsBusy = true;
+        podCmdProc.command = ["podctl"].concat(next);
+        podCmdProc.running = true;
+    }
+    function setPodsMode(m) {
+        if (!root.podsConnected || !root.podsDaemonUp) return;
+        root.podsMode = m;
+        runPodCmd(["mode", m]);
+    }
+    function cyclePodsMode() {
+        if (!root.podsDaemonUp) { ui.ccPage = "airpods"; return; }
+        if (!root.podsConnected) { if (root.podsKnown) togglePodsConnect(); else ui.ccPage = "airpods"; return; }
+        var order = [];
+        if (root.podsHasAnc) order.push("anc");
+        if (root.podsHasTransp) order.push("transparency");
+        if (root.podsHasAdaptive) order.push("adaptive");
+        if (order.length > 0) {
+            var idx = order.indexOf(root.podsMode);
+            root.podsMode = order[(idx + 1) % order.length];
+        }
+        runPodCmd(["mode", "next"]);
+    }
+    function togglePodsConv() {
+        var next = !root.podsConvAware;
+        root.podsConvAware = next;
+        runPodCmd(["conv", next ? "on" : "off"]);
+    }
+    function togglePodsEar() {
+        var next = !root.podsEarDetect;
+        root.podsEarDetect = next;
+        runPodCmd(["ear", next ? "on" : "off"]);
+    }
+    function togglePodsOneBudAnc() {
+        var next = !root.podsOneBudAnc;
+        root.podsOneBudAnc = next;
+        runPodCmd(["one-bud-anc", next ? "on" : "off"]);
+    }
+    function togglePodsAutoConnect() {
+        var next = !root.podsAutoConnect;
+        root.podsAutoConnect = next;
+        runPodCmd(["auto-connect", next ? "on" : "off"]);
+    }
+    function setPodsChime(v) {
+        root.podsChime = v;
+        runPodCmd(["chime", String(v)]);
+    }
+    function setPodsLatency(ms) {
+        root.podsLatency = ms;
+        runPodCmd(["latency", String(ms)]);
+    }
+    function renamePods(newName) {
+        var n = String(newName || "").trim();
+        if (n === "") return;
+        root.podsName = n;
+        runPodCmd(["rename", n]);
+    }
+    function showPodsPopup() {
+        runPodCmd(["popup"]);
+    }
+    function setPodsAutoAnc(lvl) {
+        root.podsAutoAnc = lvl;
+        root.podsMode = "adaptive";
+        runPodCmd(["auto-anc", lvl]);
+    }
+    function setPodsMic(m) {
+        root.podsMic = m;
+        runPodCmd(["mic", m]);
+    }
+    function setPodsProfile(p) {
+        root.podsProfile = p;
+        runPodCmd(["profile", p]);
+    }
+    function setPodsCodec(c) {
+        root.podsCodec = c;
+        runPodCmd(["codec", c]);
+    }
+    function setPodsDefaultSink() {
+        root.podsIsDefaultSink = true;
+        runPodCmd(["default"]);
+    }
+    function togglePodsConnect() {
+        if (!root.podsKnown || root.podsBusy) return;
+        runPodCmd([root.podsConnected ? "disconnect" : "connect"]);
+    }
+    function startPodDaemon() {
+        root.podsError = "";
+        root.podsBusy = true;
+        podDaemonStartProc.running = true;
+    }
+
+    Timer { id: podsRefreshDebounce; interval: 140; onTriggered: root.refreshPods() }
+    Timer {
+        id: podsWatchRetry
+        interval: 15000
+        repeat: true
+        running: !root.launcherOnly && (!podWatchProc.running || (root.podsKnown && !podBleProc.running))
+        onTriggered: {
+            if (root.launcherOnly) return;
+            if (!podWatchProc.running) podWatchProc.running = true;
+            if (root.podsKnown && !podBleProc.running) podBleProc.running = true;
+        }
+    }
+    Process {
+        id: podWatchProc
+        running: !root.launcherOnly
+        command: ["podctl", "watch", "--json"]
+        stdout: SplitParser {
+            onRead: line => root.parsePodStreamLine(line)
+        }
+        onExited: (code, status) => {
+            if (code !== 0) root.podsDaemonUp = false;
+        }
+    }
+    Process {
+        id: podBleProc
+        running: !root.launcherOnly && root.podsKnown
+        command: ["python3", "-B", "-u", decodeURIComponent(Qt.resolvedUrl("podble.py").toString().replace("file://", ""))]
+        stdout: SplitParser {
+            onRead: line => root.parsePodBleLine(line)
+        }
+    }
+    Process {
+        id: podStatusProc
+        command: ["sh", "-c", "podctl status --json 2>/dev/null || true; podctl list --json 2>/dev/null || true"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var lines = text.split("\n");
+                for (var i = 0; i < lines.length; i++) root.parsePodStreamLine(lines[i]);
+            }
+        }
+    }
+    Process {
+        id: podCmdProc
+        stderr: StdioCollector {
+            onStreamFinished: {
+                var err = text.trim();
+                if (err !== "") root.podsError = err;
+            }
+        }
+        onExited: (code, status) => {
+            root.podsBusy = false;
+            if (root.podsCmdQueue.length > 0) {
+                root._pumpPodCmd();
+            } else {
+                podsRefreshDebounce.restart();
+                btAfter.restart();
+            }
+        }
+    }
+    Process {
+        id: podDaemonStartProc
+        command: ["sh", "-c", "systemctl --user enable --now podctld.service >/dev/null 2>&1"]
+        stderr: StdioCollector {
+            onStreamFinished: {
+                var err = text.trim();
+                if (err !== "") root.podsError = err;
+            }
+        }
+        onExited: (code, status) => {
+            root.podsBusy = false;
+            root.podsDaemonUp = (code === 0);
+            podsRefreshDebounce.restart();
+            if (!podWatchProc.running) podWatchProc.running = true;
+        }
     }
     readonly property bool airplane: !wifiOn && !btOn
     function toggleAirplane() {
@@ -4612,11 +5135,22 @@ Scope {
                 var cl = root.ccControls.slice();
                 if (cl.indexOf("record") < 0) { var fi = cl.indexOf("focus"); cl.splice(fi >= 0 ? fi + 1 : cl.length, 0, "record"); root.ccControls = cl; }
             }
+            if (!root.ccMigPods) {
+                root.ccMigPods = true;
+                var ca = root.ccControls.slice();
+                if (ca.indexOf("airpods") < 0) {
+                    var bi = ca.indexOf("bluetooth");
+                    ca.splice(bi >= 0 ? bi + 1 : ca.length, 0, "airpods");
+                    var frozenPods = root.ccFreeze(root.ccLayout(root.ccControls, 0));
+                    if (root.ccLayout(ca, 0, frozenPods).rows <= root.ccMaxRows) root.ccControls = ca;
+                }
+                saveTimer.restart();
+            }
             root.settingsReady = true;
             inputApplyT.restart();
             if (root.barStyle === "liquid") root.startGlass();
         }
-        onLoadFailed: { root.ccMigRec = true; root.settingsReady = true; if (root.barStyle === "liquid") root.startGlass(); }
+        onLoadFailed: { root.ccMigRec = true; root.ccMigPods = true; root.settingsReady = true; if (root.barStyle === "liquid") root.startGlass(); }
     }
 
     // ═════════════ LIQUID GLASS BACKEND (same pipeline as macdock) ═════════════
@@ -5491,7 +6025,7 @@ Scope {
                 }
             }
             WlrLayershell.layer: WlrLayer.Top
-            WlrLayershell.keyboardFocus: ((ui.pop === "wifi" || (ui.pop === "cc" && ui.ccPage === "wifi")) && ui.wifiPrompt !== "") ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+            WlrLayershell.keyboardFocus: (((ui.pop === "wifi" || (ui.pop === "cc" && ui.ccPage === "wifi")) && ui.wifiPrompt !== "") || (ui.pop === "cc" && ui.ccPage === "airpods" && ui.podsRenaming)) ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
 
             mask: Region { item: maskItem; Region { item: toastMask } }
 
@@ -5530,6 +6064,7 @@ Scope {
                 property int calYear: 2026
                 property int calMonth: 0
                 property string wifiPrompt: ""      // ssid whose password field is open in the Wi-Fi popover
+                property bool podsRenaming: false   // AirPods name inline editor is open
                 property bool ccEdit: false         // Control Center is in "Edit Controls" mode
                 property bool ccMenuOpen: false
                 property string ccMenuTileId: ""
@@ -5539,7 +6074,7 @@ Scope {
                 function closeCcMenu() { ccMenuOpen = false; }
                 onCcEditChanged: { root.ccEditing = ccEdit; ccMenuOpen = false; }
                 property string ccPage: ""          // "" = the control grid, "wifi" = the Wi-Fi list shown inside the Control Center
-                onCcPageChanged: { wifiPrompt = ""; ccMenuOpen = false; }
+                onCcPageChanged: { wifiPrompt = ""; podsRenaming = false; ccMenuOpen = false; }
                 Timer { interval: 400; repeat: true; running: ui.pop === "vol"; onTriggered: root.audioTick++ }
                 Timer { interval: 1800; repeat: true; running: ui.pop === "bat"; onTriggered: root.refreshBatteryTelemetry() }
                 readonly property bool toastScreen: root.launcherOnly && root.launcherMonitor !== ""
@@ -8500,7 +9035,9 @@ Scope {
                                                       ? (devRow.modelData.connected ? I18n.tr("Disconnecting\u2026") : I18n.tr("Connecting\u2026"))
                                                       : (devRow.modelData.connected
                                                          ? (bma.containsMouse ? I18n.tr("Click to disconnect")
-                                                            : (I18n.tr("Connected") + (devRow.modelData.bat !== "" ? " \u00B7 " + devRow.modelData.bat + "%" : "")))
+                                                            : (root.podsDaemonUp && root.podsAddress !== "" && (devRow.modelData.mac || "").toUpperCase() === root.podsAddress.toUpperCase()
+                                                               ? (root.podsBatSummary(true) || root.podsModeLabel(root.podsMode, true))
+                                                               : (I18n.tr("Connected") + (devRow.modelData.bat !== "" ? " \u00B7 " + devRow.modelData.bat + "%" : ""))))
                                                          : (bma.containsMouse ? I18n.tr("Click to connect") : I18n.tr("Not Connected")))
                                                 color: pp.fg2
                                                 font.family: root.fontForWeight(Font.Normal, pp.fam); font.pixelSize: 11
@@ -8597,6 +9134,41 @@ Scope {
                         }
 
                         Rectangle { width: parent.width; height: 1; color: pp.sep }
+                        Item {
+                            visible: root.podsKnown
+                            width: parent.width; height: 30
+                            Rectangle {
+                                anchors.fill: parent; radius: 8
+                                color: root.accent
+                                visible: bpa.containsMouse
+                            }
+                            Glyph {
+                                x: 10; anchors.verticalCenter: parent.verticalCenter
+                                width: 13; height: 13; kind: "airpods"
+                                color: bpa.containsMouse ? "white" : pp.fg2
+                            }
+                            Text {
+                                x: 28; anchors.verticalCenter: parent.verticalCenter
+                                text: root.podsName + " \u2026"
+                                color: bpa.containsMouse ? "white" : pp.fg
+                                font.family: root.fontForWeight(Font.Normal, pp.fam); font.pixelSize: 13
+                            }
+                            Glyph {
+                                anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                width: 10; height: 10; kind: "chevR"
+                                color: bpa.containsMouse ? "white" : pp.fg2
+                            }
+                            MouseArea {
+                                id: bpa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    root.refreshPods();
+                                    ui.ccPage = "airpods";
+                                    if (!btCol.showBack) ui.openPop("cc", 0);
+                                }
+                            }
+                        }
                         Item {
                             width: parent.width; height: 30
                             Rectangle {
@@ -8820,7 +9392,7 @@ Scope {
                     id: cc
                     z: 10
                     width: 300
-                    height: ui.ccPage === "" ? ccCol.height : (ui.ccPage === "wifi" ? ccWifiPage.height : (ui.ccPage === "bt" ? ccBtPage.height : ccSoundPage.height))
+                    height: ui.ccPage === "" ? ccCol.height : (ui.ccPage === "wifi" ? ccWifiPage.height : (ui.ccPage === "bt" ? ccBtPage.height : (ui.ccPage === "airpods" ? ccAirPodsPage.height : ccSoundPage.height)))
                     x: Math.max(8, ui.width - width - 10)
                     y: root.barHeight + 6
                     // opening (ColorOS 17): the panel springs out from the Control Center button, overshoots a little and
@@ -8855,7 +9427,7 @@ Scope {
                     // the panel itself never moves above the bar (the menu bar is transparent, so anything that did would
                     // show straight through it). The motion lives in the controls: they slide up into place inside it.
                     onOpeningChanged: if (opening) openSeq++
-                    onVisibleChanged: if (visible) { root.refreshWifi(); root.refreshBt(); root.refreshBrightness(); }
+                    onVisibleChanged: if (visible) { root.refreshWifi(); root.refreshBt(); root.refreshBrightness(); root.refreshPods(); }
 
                     // Swallow right-clicks inside the Control Center background (so click-away doesn't close it) and open ccCtx
                     MouseArea {
@@ -8946,6 +9518,7 @@ Scope {
                         switch (id) {
                         case "wifi": return cWifi;
                         case "bluetooth": return cBt;
+                        case "airpods": return cAirPods;
                         case "airplane": return cAirplane;
                         case "focus": return cFocus;
                         case "nightshift": return cNight;
@@ -8985,6 +9558,170 @@ Scope {
                             hasArrow: true
                             onClicked: { root.btError = ""; root.scanBt(); root.refreshBt(); ui.ccPage = "bt"; }
                             onArrowClicked: { root.btError = ""; root.scanBt(); root.refreshBt(); ui.ccPage = "bt"; }
+                        }
+                    }
+                    Component {
+                        id: cAirPods
+                        CCTile {
+                            id: apTile
+                            t: ccPal; gx: ccg
+                            readonly property bool isSmall: width <= 110
+                            readonly property bool isBig: !isSmall && height > 100
+                            on: root.podsConnected
+                            clickable: !isBig
+                            radius: isBig ? 30 : 34
+                            onClicked: { root.refreshPods(); ui.ccPage = "airpods"; }
+
+                            // 1x1 circle mode
+                            Glyph {
+                                visible: apTile.isSmall
+                                anchors.centerIn: parent
+                                width: 23; height: 23
+                                kind: "airpods"
+                                color: root.podsConnected ? String(root.accent) : apTile.fg
+                            }
+
+                            // 2x1 wide pill mode
+                            CCBtn {
+                                visible: !apTile.isSmall && !apTile.isBig
+                                z: 3
+                                glass: false
+                                t: ccPal; gx: ccg
+                                d: 40; x: 12; y: (apTile.height - height) / 2
+                                kind: "airpods"
+                                on: root.podsConnected
+                                onTint: String(root.accent)
+                                onClicked: root.cyclePodsMode()
+                            }
+                            Column {
+                                visible: !apTile.isSmall && !apTile.isBig
+                                x: 62
+                                y: (apTile.height - height) / 2
+                                width: apTile.width - x - 26
+                                spacing: 1
+                                Text {
+                                    width: parent.width; elide: Text.ElideRight
+                                    text: root.podsKnown ? root.podsName : I18n.tr("AirPods")
+                                    color: ccPal.fg
+                                    font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 13; font.weight: Font.DemiBold
+                                }
+                                Text {
+                                    width: parent.width; elide: Text.ElideRight
+                                    text: root.podsTileSubtitle()
+                                    color: ccPal.fg2
+                                    font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 11
+                                }
+                            }
+                            Glyph {
+                                visible: !apTile.isSmall && !apTile.isBig
+                                anchors.right: parent.right; anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 11; height: 11; kind: "chevR"; color: ccPal.fg2
+                                opacity: apTile.hovered ? 1 : 0.45
+                                Behavior on opacity { NumberAnimation { duration: 150 } }
+                            }
+
+                            // 2x2 square card: quick header + battery + direct noise control pills
+                            Item {
+                                visible: apTile.isBig
+                                anchors.fill: parent
+                                Item {
+                                    x: 10; y: 10
+                                    width: parent.width - 20; height: 42
+                                    CCBtn {
+                                        z: 3; glass: false
+                                        t: ccPal; gx: ccg
+                                        d: 38; x: 0; y: 2
+                                        kind: "airpods"
+                                        on: root.podsConnected
+                                        onTint: String(root.accent)
+                                        onClicked: root.cyclePodsMode()
+                                    }
+                                    Column {
+                                        x: 46; y: 4
+                                        width: parent.width - 46 - 16
+                                        spacing: 1
+                                        Text {
+                                            width: parent.width; elide: Text.ElideRight
+                                            text: root.podsKnown ? root.podsName : I18n.tr("AirPods")
+                                            color: ccPal.fg
+                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 13; font.weight: Font.DemiBold
+                                        }
+                                        Text {
+                                            width: parent.width; elide: Text.ElideRight
+                                            text: !root.podsDaemonUp ? I18n.tr("Daemon Off")
+                                                : (!root.podsConnected ? (root.podsKnown ? I18n.tr("Not Connected") : I18n.tr("Unavailable"))
+                                                   : (root.podsBatSummary(true) || root.podsModeLabel(root.podsMode, true)))
+                                            color: ccPal.fg2
+                                            font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 10
+                                        }
+                                    }
+                                    Glyph {
+                                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                        width: 11; height: 11; kind: "chevR"; color: ccPal.fg2
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent; anchors.leftMargin: 42
+                                        onClicked: { root.refreshPods(); ui.ccPage = "airpods"; }
+                                    }
+                                }
+
+                                Row {
+                                    visible: root.podsDaemonUp && root.podsConnected
+                                    x: 10; y: apTile.height - height - 12
+                                    width: apTile.width - 20
+                                    spacing: 4
+                                    Repeater {
+                                        model: root.podsHasAdaptive ? ["off", "anc", "transparency", "adaptive"] : ["off", "anc", "transparency"]
+                                        delegate: Rectangle {
+                                            id: apBigModeBtn
+                                            required property string modelData
+                                            readonly property int cnt: root.podsHasAdaptive ? 4 : 3
+                                            readonly property bool active: root.podsMode === modelData
+                                            width: (parent.width - (cnt - 1) * 4) / cnt
+                                            height: 52; radius: 14
+                                            color: active ? String(root.accent) : (apBmMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                            Behavior on color { ColorAnimation { duration: 140 } }
+                                            Glyph {
+                                                anchors.horizontalCenter: parent.horizontalCenter; y: 10
+                                                width: 15; height: 15
+                                                kind: apBigModeBtn.modelData === "off" ? "noise_off" : apBigModeBtn.modelData
+                                                color: apBigModeBtn.active ? "white" : ccPal.fg
+                                            }
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter; y: 31
+                                                width: parent.width - 4; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                                                text: root.podsModeLabel(apBigModeBtn.modelData, true)
+                                                color: apBigModeBtn.active ? "white" : ccPal.fg2
+                                                font.family: root.fontForWeight(apBigModeBtn.active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                font.pixelSize: 9; font.weight: apBigModeBtn.active ? Font.DemiBold : Font.Normal
+                                            }
+                                            MouseArea {
+                                                id: apBmMa
+                                                anchors.fill: parent; hoverEnabled: true
+                                                onClicked: root.setPodsMode(apBigModeBtn.modelData)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    visible: !root.podsDaemonUp || !root.podsConnected
+                                    x: 12; y: apTile.height - height - 14
+                                    width: apTile.width - 24; height: 34; radius: 12
+                                    color: apBigActMa.containsMouse ? String(root.accent) : ccPal.btnOff
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: !root.podsDaemonUp ? I18n.tr("Start Daemon") : (root.podsKnown ? I18n.tr("Connect AirPods") : I18n.tr("Open Settings"))
+                                        color: apBigActMa.containsMouse ? "white" : ccPal.fg
+                                        font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                    }
+                                    MouseArea {
+                                        id: apBigActMa; anchors.fill: parent; hoverEnabled: true
+                                        onClicked: !root.podsDaemonUp ? root.startPodDaemon() : (root.podsKnown ? root.togglePodsConnect() : (ui.ccPage = "airpods"))
+                                    }
+                                }
+                            }
                         }
                     }
                     Component {
@@ -9370,6 +10107,594 @@ Scope {
                         }
                     }
 
+                    // AirPods / podctl page inside Control Center
+                    Item {
+                        id: ccAirPodsPage
+                        readonly property bool shown: ui.ccPage === "airpods"
+                        width: parent.width
+                        height: apPageCol.height + 24
+                        opacity: shown ? 1 : 0
+                        visible: opacity > 0.01
+                        Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        GGlass { visible: root.ccStyle !== "macos"; anchors.fill: parent; gx: ccg; cornerR: 26; thickness: 22; shadowAmt: 0.45 }
+                        MacParts.CornerBorder { visible: root.ccStyle !== "macos"; z: 2; anchors.fill: parent; cornerR: 26; dark: ccg.dark; tint: ccg.borderTint; amount: ccg.borderAmount; lineW: 0.8 }
+                        MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons }
+                        Column {
+                            id: apPageCol
+                            x: 12; y: 12
+                            width: parent.width - 24
+                            spacing: 6
+
+                            // Header
+                            Item {
+                                width: parent.width; height: 34
+                                Item {
+                                    x: 0; width: 28; height: parent.height
+                                    Glyph { anchors.centerIn: parent; width: 12; height: 12; kind: "chevL"; color: ccPal.fg }
+                                    MouseArea { anchors.fill: parent; onClicked: ui.ccPage = "" }
+                                }
+                                Column {
+                                    visible: !ui.podsRenaming
+                                    x: 30; anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 30 - (apConnBtn.visible ? apConnBtn.width + 6 : 0)
+                                    spacing: 0
+                                    Row {
+                                        width: parent.width; spacing: 5
+                                        Text {
+                                            width: Math.min(implicitWidth, parent.width - (apRenameIcon.visible ? 20 : 0))
+                                            elide: Text.ElideRight
+                                            text: root.podsKnown ? root.podsName : I18n.tr("AirPods")
+                                            color: ccPal.fg
+                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 14; font.weight: Font.DemiBold
+                                        }
+                                        Item {
+                                            id: apRenameIcon
+                                            visible: root.podsKnown
+                                            width: 16; height: 16
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            Glyph {
+                                                anchors.centerIn: parent; width: 11; height: 11; kind: "pencil"
+                                                color: apRenMa.containsMouse ? ccPal.fg : ccPal.fg2
+                                            }
+                                            MouseArea {
+                                                id: apRenMa; anchors.fill: parent; anchors.margins: -3; hoverEnabled: true
+                                                onClicked: {
+                                                    apRenField.text = root.podsName;
+                                                    ui.podsRenaming = true;
+                                                    apRenField.forceActiveFocus();
+                                                    apRenField.selectAll();
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width; elide: Text.ElideRight
+                                        text: !root.podsDaemonUp ? I18n.tr("Daemon inactive")
+                                            : (root.podsConnected ? (root.podsModelLabel(root.podsModel) || I18n.tr("Connected")) : I18n.tr("Disconnected"))
+                                        color: ccPal.fg2
+                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 10
+                                    }
+                                }
+                                // Inline rename field
+                                Rectangle {
+                                    visible: ui.podsRenaming
+                                    x: 30; anchors.verticalCenter: parent.verticalCenter
+                                    width: parent.width - 34; height: 28; radius: 8
+                                    color: ccPal.btnOff
+                                    border.width: 1; border.color: String(root.accent)
+                                    TextInput {
+                                        id: apRenField
+                                        anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 28
+                                        verticalAlignment: TextInput.AlignVCenter
+                                        color: ccPal.fg; selectionColor: String(root.accent)
+                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 12
+                                        clip: true
+                                        Keys.onEscapePressed: ui.podsRenaming = false
+                                        Keys.onReturnPressed: {
+                                            root.renamePods(text);
+                                            ui.podsRenaming = false;
+                                        }
+                                    }
+                                    Item {
+                                        anchors.right: parent.right; anchors.rightMargin: 4; anchors.verticalCenter: parent.verticalCenter
+                                        width: 20; height: 20
+                                        Glyph { anchors.centerIn: parent; width: 11; height: 11; kind: "check"; color: String(root.accent) }
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            onClicked: { root.renamePods(apRenField.text); ui.podsRenaming = false; }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    id: apConnBtn
+                                    visible: root.podsKnown && !ui.podsRenaming
+                                    anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                    width: apConnTxt.implicitWidth + 16; height: 24; radius: 12
+                                    color: root.podsConnected
+                                           ? (apConnMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                           : (apConnMa.containsMouse ? Qt.lighter(String(root.accent), 1.1) : String(root.accent))
+                                    opacity: root.podsBusy ? 0.55 : 1
+                                    Text {
+                                        id: apConnTxt
+                                        anchors.centerIn: parent
+                                        text: root.podsBusy ? "\u2026" : (root.podsConnected ? I18n.tr("Disconnect") : I18n.tr("Connect"))
+                                        color: root.podsConnected ? ccPal.fg : "white"
+                                        font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold
+                                    }
+                                    MouseArea {
+                                        id: apConnMa; anchors.fill: parent; hoverEnabled: true; enabled: !root.podsBusy
+                                        onClicked: root.togglePodsConnect()
+                                    }
+                                }
+                            }
+                            Rectangle { width: parent.width; height: 1; color: ccPal.sep }
+
+                            Flickable {
+                                id: apPageFlick
+                                width: parent.width
+                                height: Math.min(apPageBody.height, 440)
+                                contentWidth: width
+                                contentHeight: apPageBody.height
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                Column {
+                                    id: apPageBody
+                                    width: apPageFlick.width
+                                    spacing: 8
+
+                                    // Daemon offline banner
+                                    Rectangle {
+                                        visible: !root.podsDaemonUp
+                                        width: parent.width; height: 48; radius: 12
+                                        color: ccPal.dark ? Qt.rgba(1, 0.7, 0.2, 0.14) : Qt.rgba(1, 0.6, 0, 0.12)
+                                        border.width: 1; border.color: Qt.rgba(1, 0.65, 0.1, 0.35)
+                                        Text {
+                                            x: 12; anchors.verticalCenter: parent.verticalCenter
+                                            width: parent.width - 110; wrapMode: Text.WordWrap
+                                            text: I18n.tr("podctld is stopped")
+                                            color: ccPal.fg; font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 12; font.weight: Font.Medium
+                                        }
+                                        Rectangle {
+                                            anchors.right: parent.right; anchors.rightMargin: 10; anchors.verticalCenter: parent.verticalCenter
+                                            width: 82; height: 26; radius: 13
+                                            color: startDmMa.containsMouse ? Qt.lighter(String(root.accent), 1.1) : String(root.accent)
+                                            Text { anchors.centerIn: parent; text: I18n.tr("Start"); color: "white"; font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold }
+                                            MouseArea { id: startDmMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.startPodDaemon() }
+                                        }
+                                    }
+
+                                    // Battery strip (Left / Right / Case — live AAP, passive BLE, or cached last-seen)
+                                    Column {
+                                        visible: root.podsBatSource !== ""
+                                        width: parent.width
+                                        spacing: 4
+                                        Row {
+                                            width: parent.width
+                                            spacing: 6
+                                            opacity: root.podsBatSource === "cache" ? 0.74 : 1.0
+                                            Repeater {
+                                                model: {
+                                                    var arr = [];
+                                                    arr.push({ label: I18n.tr("Left"), pct: root.podsShowLeft, chg: root.podsShowChgLeft, ear: root.podsConnected ? root.podsEarLabel(root.podsEarLeft) : "" });
+                                                    arr.push({ label: I18n.tr("Right"), pct: root.podsShowRight, chg: root.podsShowChgRight, ear: root.podsConnected ? root.podsEarLabel(root.podsEarRight) : "" });
+                                                    if (root.podsHasCaseBat)
+                                                        arr.push({ label: I18n.tr("Case"), pct: root.podsShowCase, chg: root.podsShowChgCase, ear: "" });
+                                                    return arr;
+                                                }
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property int cnt: root.podsHasCaseBat ? 3 : 2
+                                                    readonly property int pct: modelData.pct
+                                                    width: (parent.width - (cnt - 1) * 6) / cnt
+                                                    height: 54; radius: 12
+                                                    color: ccPal.btnOff
+                                                    Row {
+                                                        x: 9; y: 7; spacing: 3
+                                                        Text {
+                                                            text: modelData.label
+                                                            color: ccPal.fg2
+                                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 10; font.weight: Font.DemiBold
+                                                        }
+                                                        Glyph {
+                                                            visible: modelData.chg
+                                                            anchors.verticalCenter: parent.verticalCenter
+                                                            width: 10; height: 10; kind: "bolt"; color: "#30D158"
+                                                        }
+                                                        Rectangle {
+                                                            visible: !modelData.chg && modelData.ear === I18n.tr("In Ear")
+                                                            anchors.verticalCenter: parent.verticalCenter
+                                                            width: 5; height: 5; radius: 2.5; color: "#30D158"
+                                                        }
+                                                    }
+                                                    Text {
+                                                        x: 9; y: 21
+                                                        text: pct >= 0 ? (pct + "%") : "\u2014"
+                                                        color: ccPal.fg
+                                                        font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 15; font.weight: Font.DemiBold
+                                                    }
+                                                    Rectangle {
+                                                        x: 9; y: parent.height - 9
+                                                        width: parent.width - 18; height: 3.5; radius: 1.75
+                                                        color: ccPal.track
+                                                        Rectangle {
+                                                            width: pct >= 0 ? parent.width * Math.max(0.05, Math.min(1, pct / 100)) : 0
+                                                            height: parent.height; radius: parent.radius
+                                                            color: pct >= 0 && pct <= 20 ? "#FF453A" : "#30D158"
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Text {
+                                            visible: root.podsBatAgeLabel() !== ""
+                                            leftPadding: 4
+                                            text: root.podsBatAgeLabel()
+                                            color: root.podsBatSource === "ble" || (root.podsBleChgFresh && root.podsBleChgCase) ? "#30D158" : ccPal.fg2
+                                            font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 10
+                                        }
+                                    }
+
+                                    // Listening Mode
+                                    Column {
+                                        visible: root.podsDaemonUp && root.podsConnected && root.podsHasAnc
+                                        width: parent.width
+                                        spacing: 5
+                                        Row {
+                                            width: parent.width
+                                            Text {
+                                                leftPadding: 4
+                                                text: I18n.tr("Noise Control")
+                                                color: ccPal.fg2
+                                                font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold
+                                            }
+                                            Item { width: 1; height: 1 }
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            spacing: 5
+                                            Repeater {
+                                                model: root.podsHasAdaptive ? ["off", "anc", "transparency", "adaptive"] : ["off", "anc", "transparency"]
+                                                delegate: Rectangle {
+                                                    id: apModeBtn
+                                                    required property string modelData
+                                                    readonly property int cnt: root.podsHasAdaptive ? 4 : 3
+                                                    readonly property bool active: root.podsMode === modelData
+                                                    width: (parent.width - (cnt - 1) * 5) / cnt
+                                                    height: 48; radius: 12
+                                                    color: active ? String(root.accent) : (apMdMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Behavior on color { ColorAnimation { duration: 140 } }
+                                                    Glyph {
+                                                        anchors.horizontalCenter: parent.horizontalCenter; y: 8
+                                                        width: 15; height: 15
+                                                        kind: apModeBtn.modelData === "off" ? "noise_off" : apModeBtn.modelData
+                                                        color: apModeBtn.active ? "white" : ccPal.fg
+                                                    }
+                                                    Text {
+                                                        anchors.horizontalCenter: parent.horizontalCenter; y: 28
+                                                        width: parent.width - 4; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                                                        text: root.podsModeLabel(apModeBtn.modelData, true)
+                                                        color: apModeBtn.active ? "white" : ccPal.fg2
+                                                        font.family: root.fontForWeight(apModeBtn.active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 10; font.weight: apModeBtn.active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea {
+                                                        id: apMdMa; anchors.fill: parent; hoverEnabled: true
+                                                        onClicked: root.setPodsMode(apModeBtn.modelData)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // Adaptive Noise Strength (shown in Adaptive mode)
+                                        Row {
+                                            visible: root.podsMode === "adaptive" && root.podsHasAdaptive
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    { id: "less-noise", label: I18n.tr("Less Noise") },
+                                                    { id: "default",    label: I18n.tr("Default") },
+                                                    { id: "more-noise", label: I18n.tr("More Noise") }
+                                                ]
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property bool active: root.podsAutoAnc === modelData.id
+                                                    width: (parent.width - 8) / 3; height: 24; radius: 8
+                                                    color: active ? ccPal.fg : (aaMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        color: active ? (ccPal.dark ? "#111111" : "#FFFFFF") : ccPal.fg2
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 10; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: aaMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsAutoAnc(modelData.id) }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Features toggles
+                                    Column {
+                                        visible: root.podsDaemonUp
+                                        width: parent.width
+                                        spacing: 2
+                                        Repeater {
+                                            model: [
+                                                { key: "conv",  label: I18n.tr("Conversation Awareness"), sub: I18n.tr("Lowers media when speaking") },
+                                                { key: "ear",   label: I18n.tr("In-Ear Auto-Pause"),      sub: I18n.tr("Pause/resume MPRIS media") },
+                                                { key: "obanc", label: I18n.tr("One-Bud ANC"),            sub: I18n.tr("Keep ANC with one bud in") },
+                                                { key: "auto",  label: I18n.tr("Auto-Connect"),           sub: I18n.tr("BlueZ trusted reconnect") },
+                                                { key: "popup", label: I18n.tr("Case-Open Bubble"),       sub: I18n.tr("Show popup on lid/case wake") }
+                                            ]
+                                            delegate: Item {
+                                                id: apSwRow
+                                                required property var modelData
+                                                readonly property bool vis: modelData.key === "conv" ? (root.podsConnected && root.podsHasConv)
+                                                    : (modelData.key === "obanc" ? (root.podsConnected && root.podsHasAnc)
+                                                       : ((modelData.key === "auto" || modelData.key === "popup") ? root.podsKnown : true))
+                                                readonly property bool chk: modelData.key === "conv" ? root.podsConvAware
+                                                    : (modelData.key === "ear" ? root.podsEarDetect
+                                                       : (modelData.key === "obanc" ? root.podsOneBudAnc
+                                                          : (modelData.key === "auto" ? root.podsAutoConnect : root.podsAutoPopup)))
+                                                visible: vis
+                                                width: parent.width; height: vis ? 38 : 0
+                                                Column {
+                                                    x: 4; anchors.verticalCenter: parent.verticalCenter
+                                                    width: parent.width - 54
+                                                    Text {
+                                                        width: parent.width; elide: Text.ElideRight
+                                                        text: apSwRow.modelData.label; color: ccPal.fg
+                                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 12
+                                                    }
+                                                    Text {
+                                                        width: parent.width; elide: Text.ElideRight
+                                                        text: apSwRow.modelData.sub; color: ccPal.fg2
+                                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 10
+                                                    }
+                                                }
+                                                PSwitch {
+                                                    t: ccPal
+                                                    anchors.right: parent.right; anchors.rightMargin: 2
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    checked: apSwRow.chk
+                                                    onToggled: {
+                                                        if (apSwRow.modelData.key === "conv") root.togglePodsConv();
+                                                        else if (apSwRow.modelData.key === "ear") root.togglePodsEar();
+                                                        else if (apSwRow.modelData.key === "obanc") root.togglePodsOneBudAnc();
+                                                        else if (apSwRow.modelData.key === "auto") root.togglePodsAutoConnect();
+                                                        else if (apSwRow.modelData.key === "popup") root.podsAutoPopup = !root.podsAutoPopup;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Chime / Tone Volume
+                                    Column {
+                                        visible: root.podsDaemonUp && root.podsConnected
+                                        width: parent.width
+                                        spacing: 4
+                                        Text {
+                                            leftPadding: 4
+                                            text: I18n.tr("Tone & Chime Volume") + (root.podsChime >= 0 ? (" \u00B7 " + root.podsChime + "%") : "")
+                                            color: ccPal.fg2
+                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    { v: 0,   label: I18n.tr("Off") },
+                                                    { v: 35,  label: I18n.tr("Low") },
+                                                    { v: 70,  label: I18n.tr("Mid") },
+                                                    { v: 100, label: I18n.tr("Max") }
+                                                ]
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property bool active: root.podsChime >= 0 && Math.abs(root.podsChime - modelData.v) <= 15
+                                                    width: (parent.width - 12) / 4; height: 24; radius: 8
+                                                    color: active ? String(root.accent) : (chmMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        color: active ? "white" : ccPal.fg
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 10; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: chmMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsChime(modelData.v) }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Microphone selection
+                                    Column {
+                                        visible: root.podsDaemonUp
+                                        width: parent.width
+                                        spacing: 4
+                                        Text {
+                                            leftPadding: 4
+                                            text: I18n.tr("Microphone")
+                                            color: ccPal.fg2
+                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    { id: "auto",  label: I18n.tr("Automatic") },
+                                                    { id: "left",  label: I18n.tr("Left") },
+                                                    { id: "right", label: I18n.tr("Right") }
+                                                ]
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property bool active: root.podsMic === modelData.id
+                                                    width: (parent.width - 8) / 3; height: 26; radius: 8
+                                                    color: active ? String(root.accent) : (micMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        color: active ? "white" : ccPal.fg
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 11; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: micMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsMic(modelData.id) }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Audio Profile + Codec + Latency + Default Sink
+                                    Column {
+                                        visible: root.podsConnected
+                                        width: parent.width
+                                        spacing: 4
+                                        Text {
+                                            leftPadding: 4
+                                            text: I18n.tr("Audio Profile") + (root.podsCodec !== "" ? (" \u00B7 " + root.podsCodec.toUpperCase()) : "")
+                                            color: ccPal.fg2
+                                            font.family: root.fontForWeight(Font.DemiBold, ccPal.fam); font.pixelSize: 11; font.weight: Font.DemiBold
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    { id: "high",    label: I18n.tr("Hi-Fi (A2DP)") },
+                                                    { id: "headset", label: I18n.tr("Headset (Mic)") }
+                                                ]
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property bool active: root.podsProfile === modelData.id
+                                                    width: (parent.width - 4) / 2; height: 26; radius: 8
+                                                    color: active ? String(root.accent) : (profMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        color: active ? "white" : ccPal.fg
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 11; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: profMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsProfile(modelData.id) }
+                                                }
+                                            }
+                                        }
+                                        Row {
+                                            visible: root.podsProfile === "high" && root.podsCodecs.length > 1
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: root.podsCodecs
+                                                delegate: Rectangle {
+                                                    required property string modelData
+                                                    readonly property bool active: root.podsCodec === modelData
+                                                    width: (parent.width - (root.podsCodecs.length - 1) * 4) / root.podsCodecs.length
+                                                    height: 22; radius: 7
+                                                    color: active ? ccPal.fg : (cdcMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.toUpperCase()
+                                                        color: active ? (ccPal.dark ? "#111111" : "#FFFFFF") : ccPal.fg2
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 10; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: cdcMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsCodec(modelData) }
+                                                }
+                                            }
+                                        }
+                                        Row {
+                                            width: parent.width
+                                            spacing: 4
+                                            Repeater {
+                                                model: [
+                                                    { v: -100, label: "-100 ms" },
+                                                    { v: -50,  label: "-50 ms" },
+                                                    { v: 0,    label: "0 ms" },
+                                                    { v: 50,   label: "+50 ms" }
+                                                ]
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    readonly property bool active: root.podsLatency === modelData.v
+                                                    width: (parent.width - 12) / 4; height: 22; radius: 7
+                                                    color: active ? ccPal.fg : (latMa.containsMouse ? ccPal.hover : ccPal.btnOff)
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        color: active ? (ccPal.dark ? "#111111" : "#FFFFFF") : ccPal.fg2
+                                                        font.family: root.fontForWeight(active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                        font.pixelSize: 10; font.weight: active ? Font.DemiBold : Font.Normal
+                                                    }
+                                                    MouseArea { id: latMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsLatency(modelData.v) }
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: !root.podsIsDefaultSink
+                                            width: parent.width; height: 28; radius: 9
+                                            color: defMa.containsMouse ? String(root.accent) : ccPal.btnOff
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: I18n.tr("Set as Default Audio Output")
+                                                color: defMa.containsMouse ? "white" : ccPal.fg
+                                                font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                            }
+                                            MouseArea { id: defMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsDefaultSink() }
+                                        }
+                                    }
+
+                                    Text {
+                                        visible: root.podsError !== ""
+                                        width: parent.width
+                                        leftPadding: 4; rightPadding: 4
+                                        wrapMode: Text.WordWrap
+                                        text: root.podsError
+                                        color: "#FF6961"
+                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 11
+                                    }
+                                }
+                            }
+
+                            Rectangle { width: parent.width; height: 1; color: ccPal.sep }
+                            Row {
+                                width: parent.width; height: 28; spacing: 4
+                                Item {
+                                    width: parent.width - (apPopBtn.visible ? apPopBtn.width + 4 : 0); height: parent.height
+                                    Rectangle { anchors.fill: parent; radius: 8; color: root.accent; visible: apSndMa.containsMouse }
+                                    Text {
+                                        x: 8; anchors.verticalCenter: parent.verticalCenter
+                                        text: I18n.tr("Sound Output\u2026")
+                                        color: apSndMa.containsMouse ? "white" : ccPal.fg
+                                        font.family: root.fontForWeight(Font.Normal, ccPal.fam); font.pixelSize: 12
+                                    }
+                                    Glyph {
+                                        anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter
+                                        width: 10; height: 10; kind: "chevR"
+                                        color: apSndMa.containsMouse ? "white" : ccPal.fg2
+                                    }
+                                    MouseArea { id: apSndMa; anchors.fill: parent; hoverEnabled: true; onClicked: ui.ccPage = "sound" }
+                                }
+                                Rectangle {
+                                    id: apPopBtn
+                                    visible: root.podsDaemonUp && root.podsKnown
+                                    width: apPopTxt.implicitWidth + 14; height: 24; radius: 8
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: apPopMa.containsMouse ? String(root.accent) : ccPal.btnOff
+                                    Text {
+                                        id: apPopTxt
+                                        anchors.centerIn: parent
+                                        text: I18n.tr("Bubble")
+                                        color: apPopMa.containsMouse ? "white" : ccPal.fg2
+                                        font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                    }
+                                    MouseArea { id: apPopMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.showPodsPopup() }
+                                }
+                            }
+                        }
+                    }
+
                     // Sound output page: pick the default audio output inside the Control Center
                     Item {
                         id: ccSoundPage
@@ -9423,6 +10748,64 @@ Scope {
                                     leftKind: "speaker"; leftLevel: root.volLevel
                                     rightKind: "speaker"; rightLevel: 3
                                     onMoved: v => root.setVolume(v)
+                                }
+                            }
+                            // Quick AirPods Noise Control strip inside Sound page (macOS style)
+                            Rectangle {
+                                visible: root.podsDaemonUp && root.podsConnected && root.podsHasAnc
+                                width: parent.width; height: 74; radius: 13
+                                color: ccPal.btnOff
+                                Item {
+                                    x: 10; y: 6; width: parent.width - 20; height: 20
+                                    Glyph { x: 0; anchors.verticalCenter: parent.verticalCenter; width: 13; height: 13; kind: "airpods"; color: ccPal.fg }
+                                    Text {
+                                        x: 17; anchors.verticalCenter: parent.verticalCenter
+                                        width: parent.width - 17 - sndApMore.width - 8; elide: Text.ElideRight
+                                        text: root.podsName + (root.podsBatSummary(false) !== "" ? (" \u00B7 " + root.podsBatSummary(false)) : "")
+                                        color: ccPal.fg; font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                    }
+                                    Row {
+                                        id: sndApMore
+                                        anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 2
+                                        Text {
+                                            text: I18n.tr("More")
+                                            color: sndApMa.containsMouse ? ccPal.fg : String(root.accent)
+                                            font.family: root.fontForWeight(Font.Medium, ccPal.fam); font.pixelSize: 11; font.weight: Font.Medium
+                                        }
+                                        Glyph { anchors.verticalCenter: parent.verticalCenter; width: 9; height: 9; kind: "chevR"; color: sndApMa.containsMouse ? ccPal.fg : String(root.accent) }
+                                    }
+                                    MouseArea { id: sndApMa; anchors.fill: parent; hoverEnabled: true; onClicked: { root.refreshPods(); ui.ccPage = "airpods"; } }
+                                }
+                                Row {
+                                    x: 8; y: 30; width: parent.width - 16; spacing: 4
+                                    Repeater {
+                                        model: root.podsHasAdaptive ? ["off", "anc", "transparency", "adaptive"] : ["off", "anc", "transparency"]
+                                        delegate: Rectangle {
+                                            id: sndModeBtn
+                                            required property string modelData
+                                            readonly property int cnt: root.podsHasAdaptive ? 4 : 3
+                                            readonly property bool active: root.podsMode === modelData
+                                            width: (parent.width - (cnt - 1) * 4) / cnt
+                                            height: 36; radius: 10
+                                            color: active ? String(root.accent) : (sndMdMa.containsMouse ? ccPal.hover : (ccPal.dark ? Qt.rgba(1, 1, 1, 0.06) : Qt.rgba(0, 0, 0, 0.05)))
+                                            Glyph {
+                                                anchors.horizontalCenter: parent.horizontalCenter; y: 5
+                                                width: 13; height: 13
+                                                kind: sndModeBtn.modelData === "off" ? "noise_off" : sndModeBtn.modelData
+                                                color: sndModeBtn.active ? "white" : ccPal.fg
+                                            }
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter; y: 20
+                                                width: parent.width - 4; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
+                                                text: root.podsModeLabel(sndModeBtn.modelData, true)
+                                                color: sndModeBtn.active ? "white" : ccPal.fg2
+                                                font.family: root.fontForWeight(sndModeBtn.active ? Font.DemiBold : Font.Normal, ccPal.fam)
+                                                font.pixelSize: 9; font.weight: sndModeBtn.active ? Font.DemiBold : Font.Normal
+                                            }
+                                            MouseArea { id: sndMdMa; anchors.fill: parent; hoverEnabled: true; onClicked: root.setPodsMode(sndModeBtn.modelData) }
+                                        }
+                                    }
                                 }
                             }
                             Text {
