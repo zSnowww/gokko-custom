@@ -2612,21 +2612,34 @@ Scope {
     }
 
     function refreshBt() { if (!btProc.running) btProc.running = true; }
-    // One line per known device: D:<mac> <paired 0|1> <connected 0|1> <battery %> <name>   (tab separated).
-    // Every device is asked with "bluetoothctl info", because the "devices Paired|Connected" filters only exist in
-    // newer BlueZ versions: older ones ignore the argument and print every device (so everything looked connected).
+    // Query BlueZ directly over D-Bus instead of spawning bluetoothctl per device every 6s
+    // (avoids repeated Adv Monitor D-Bus registrations in bluetoothd logs and reduces latency).
     Process {
         id: btProc
-        command: ["sh", "-c",
-            "p=$(timeout 4 bluetoothctl show 2>/dev/null </dev/null | sed -E 's/\\x1B\\[[0-9;]*[[:alpha:]]//g' | grep -i 'Powered:' | head -n1); echo \"P:$p\"; "
-            + "timeout 4 bluetoothctl devices 2>/dev/null </dev/null | sed -E 's/\\x1B\\[[0-9;]*[[:alpha:]]//g' | while read -r _ mac name; do "
-            + "[ -n \"$mac\" ] || continue; "
-            + "i=$(timeout 3 bluetoothctl info \"$mac\" 2>/dev/null </dev/null | sed -E 's/\\x1B\\[[0-9;]*[[:alpha:]]//g'); "
-            + "pr=0; printf '%s\\n' \"$i\" | grep -qE '^[[:space:]]*(Paired|Bonded): yes' && pr=1; "
-            + "c=0; printf '%s\\n' \"$i\" | grep -qE '^[[:space:]]*Connected: yes' && c=1; "
-            + "b=$(printf '%s\\n' \"$i\" | sed -n 's/.*Battery Percentage: 0x[0-9a-fA-F]* (\\([0-9]*\\)).*/\\1/p' | head -n1); "
-            + "printf 'D:%s\\t%s\\t%s\\t%s\\t%s\\n' \"$mac\" \"$pr\" \"$c\" \"$b\" \"$name\"; "
-            + "done"
+        command: ["python3", "-B", "-c",
+            "import dbus\n"
+            + "try:\n"
+            + "    objs = dbus.Interface(dbus.SystemBus().get_object('org.bluez', '/'), 'org.freedesktop.DBus.ObjectManager').GetManagedObjects()\n"
+            + "except Exception:\n"
+            + "    objs = {}\n"
+            + "powered = False\n"
+            + "for ifaces in objs.values():\n"
+            + "    ad = ifaces.get('org.bluez.Adapter1')\n"
+            + "    if ad is not None and bool(ad.get('Powered', False)):\n"
+            + "        powered = True\n"
+            + "        break\n"
+            + "print('P:' + ('yes' if powered else 'no'))\n"
+            + "for ifaces in objs.values():\n"
+            + "    d = ifaces.get('org.bluez.Device1')\n"
+            + "    if not d: continue\n"
+            + "    mac = str(d.get('Address', ''))\n"
+            + "    if not mac: continue\n"
+            + "    pr = 1 if (d.get('Paired', False) or d.get('Bonded', False)) else 0\n"
+            + "    c = 1 if d.get('Connected', False) else 0\n"
+            + "    b = ifaces.get('org.bluez.Battery1')\n"
+            + "    bat = str(int(b['Percentage'])) if (b and 'Percentage' in b) else ''\n"
+            + "    name = str(d.get('Alias') or d.get('Name') or mac).replace('\\t', ' ').replace('\\n', ' ')\n"
+            + "    print(f'D:{mac}\\t{pr}\\t{c}\\t{bat}\\t{name}')\n"
         ]
         stdout: StdioCollector {
             onStreamFinished: {

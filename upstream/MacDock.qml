@@ -3985,11 +3985,12 @@ Scope {
             var trashName = root.trashFull ? "user-trash-full" : "user-trash";
             var trash = gokkoIndexedIcon(trashName);
             if (trash !== "") return "file://" + trash;
-            // This known WhiteSur path avoids the broken Qt image://icon
-            // provider, which was producing a magenta checkerboard for Trash.
-            return "file://" + Quickshell.env("HOME")
-                + "/.local/share/icons/WhiteSur-dark/places/scalable/"
-                + trashName + ".svg";
+            void Ryoku.Icons.rev;
+            var themedTrash = Ryoku.Icons.path(trashName, true);
+            if (themedTrash && themedTrash.indexOf("image://icon/") !== 0) return themedTrash;
+            if (Object.keys(index).length === 0) return "";
+            var fallbackTrash = gokkoIndexedIcon("user-trash") || gokkoIndexedIcon("user-trash-symbolic");
+            return fallbackTrash !== "" ? ("file://" + fallbackTrash) : ("file://" + root.logoPath);
         }
         var raw = String(it.icon || "");
         if (raw === root.logoPath || it.special === "custom")
