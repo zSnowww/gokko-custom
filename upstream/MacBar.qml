@@ -587,7 +587,8 @@ Scope {
     // light/dark by itself. Menus and Spotlight keep their glass tint but flip their text when the measured backdrop would make the
     // normal colour unreadable (bgTone). Colours cross-fade (ptk / btk: 1 = white text, 0 = dark text).
     property int barTone: 0                   // measured behind the bar strip: 1 bright, -1 dark, 0 not measured yet
-    readonly property bool barTextDark: barTone === 1 ? true : (barTone === -1 ? false : !darkMode)
+    readonly property bool barDarkScrim: effDark && ((barGlass && liquidActive && !nativeBackdrop) || barBgOpacity > 0.001)
+    readonly property bool barTextDark: barDarkScrim ? false : (barTone === 1 ? true : (barTone === -1 ? false : !darkMode))
     property real btk: barTextDark ? 0 : 1
     Behavior on btk { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
     function mixb(l, d) { return Qt.rgba(l.r + (d.r - l.r) * btk, l.g + (d.g - l.g) * btk, l.b + (d.b - l.b) * btk, l.a + (d.a - l.a) * btk); }
@@ -644,8 +645,8 @@ Scope {
         readonly property string fam: root.fontFamily
         readonly property color accent: root.accent
         readonly property color fg: root.mixb(Qt.color("#1D1D1F"), Qt.color("#FFFFFF"))
-        readonly property color fg2: root.mixb(Qt.rgba(0, 0, 0, 0.55), Qt.rgba(1, 1, 1, 0.62))
-        readonly property color fg3: root.mixb(Qt.rgba(0, 0, 0, 0.32), Qt.rgba(1, 1, 1, 0.34))
+        readonly property color fg2: root.mixb(Qt.rgba(0, 0, 0, 0.55), Qt.rgba(1, 1, 1, 0.74))
+        readonly property color fg3: root.mixb(Qt.rgba(0, 0, 0, 0.32), Qt.rgba(1, 1, 1, 0.50))
         readonly property color tile: dark ? Qt.rgba(1, 1, 1, 0.10) : Qt.rgba(1, 1, 1, 0.42)
         readonly property color tileBorder: dark ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(1, 1, 1, 0.70)
         readonly property color btnOff: dark ? Qt.rgba(1, 1, 1, 0.20) : Qt.rgba(0, 0, 0, 0.10)
@@ -5999,9 +6000,12 @@ Scope {
 
             Rectangle {
                 anchors.fill: parent
-                readonly property real barTint: root.nativeBackdrop
-                    ? Math.max(0.16, root.barBgOpacity) : root.barBgOpacity
-                color: root.darkMode ? Qt.rgba(0.10, 0.10, 0.11, barTint) : Qt.rgba(1, 1, 1, barTint)
+                readonly property real barTint: root.darkMode
+                    ? (root.barGlass && root.liquidActive && !root.nativeBackdrop
+                        ? root.barBgOpacity
+                        : Math.max(0.62, root.barBgOpacity))
+                    : (root.nativeBackdrop ? Math.max(0.16, root.barBgOpacity) : root.barBgOpacity)
+                color: root.darkMode ? Qt.rgba(0.07, 0.07, 0.09, barTint) : Qt.rgba(1, 1, 1, barTint)
             }
         }
 
@@ -6735,14 +6739,30 @@ Scope {
                     dark: root.effDark
                     bx: 0; by: 0
                     cornerR: 0
-                    tint: root.glassOpacity * 0.6
-                    thickness: 16
-                    strength: 0.9 * root.glassLiquid
-                    rim: root.glassRim
+                    tint: root.effDark ? Math.max(0.85, root.glassOpacity) : root.glassOpacity * 0.6
+                    thickness: root.effDark ? 10 : 16
+                    strength: (root.effDark ? 0.45 : 0.9) * root.glassLiquid
+                    rim: root.effDark ? 0.12 : root.glassRim
                     grain: root.glassGrain
-                    blur: root.glassBlur
+                    blur: root.effDark ? Math.max(14, root.glassBlur) : root.glassBlur
                     debug: root.glassDebug
                     onShaderError: root.glassState = "failed"
+                }
+
+                // Smoked dark-glass scrim over barGlassStrip in dark mode so bright wallpaper top edges
+                // never wash out the menu bar or lower text/icon contrast, while keeping subtle glass depth.
+                Rectangle {
+                    id: barDarkOverlay
+                    visible: !root.launcherOnly && root.effDark && (barGlassStrip.visible || (!(root.barGlass && root.liquidActive) && root.barBgOpacity > 0.001))
+                    x: 0; y: 0
+                    width: ui.width
+                    height: root.barHeight
+                    color: Qt.rgba(0.06, 0.06, 0.08, barGlassStrip.visible ? Math.max(0.58, Math.min(0.76, 0.48 + root.barBgOpacity)) : 0)
+                    Rectangle {
+                        anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
+                        height: 1
+                        color: Qt.rgba(1, 1, 1, 0.10)
+                    }
                 }
 
                 // click-away layer (under the popovers and the bar)

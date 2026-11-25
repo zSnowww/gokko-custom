@@ -145,7 +145,7 @@ Scope {
         // forget admission records of windows that no longer exist (the table grew by one entry per window ever opened)
         function tlPrune() {
             var ts = macWm.toplevels.values, live = {}, k;
-            for (var i = 0; i < ts.length; i++) live[ts[i].address] = true;
+            for (var i = 0; i < ts.length; i++) live[String(ts[i].address).replace(/^0x/, "")] = true;
             for (k in tlState.ready) if (!live[k]) delete tlState.ready[k];
         }
 
@@ -218,7 +218,7 @@ Scope {
         function tlSeed() {
             var ts = macWm.toplevels.values, st = tlState, now = Date.now();
             for (var i = 0; i < ts.length; i++) {
-                var a = ts[i].address;
+                var a = String(ts[i].address).replace(/^0x/, "");
                 if (st.ready[a] === undefined) { st.ready[a] = Math.max(now + 200, st.last + 110); st.last = st.ready[a]; }
             }
         }
@@ -226,7 +226,7 @@ Scope {
             var a = String(addr).replace(/^0x/, "");
             var ts = macWm.toplevels.values;
             for (var i = 0; i < ts.length; i++) {
-                if (ts[i].address !== a) continue;
+                if (String(ts[i].address).replace(/^0x/, "") !== a) continue;
                 var st = tlState, now = Date.now();
                 if (st.ready[a] === undefined) {
                     st.ready[a] = Math.max(now + 200, st.last + 110);

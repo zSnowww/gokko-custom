@@ -14,16 +14,21 @@ Scope {
 
     readonly property var outputRows: {
         const outputs = Wm.outputs || []
+        const wss = Wm.workspaces || []
         const rows = []
         for (let i = 0; i < outputs.length; i++) {
             const o = outputs[i]
             const ws = String(o.activeWorkspace || "")
+            let sp = 0
+            for (let j = 0; j < wss.length; j++) {
+                if (wss[j].special && wss[j].active && wss[j].output === o.name) { sp = String(wss[j].id || wss[j].name); break }
+            }
             rows.push({
                 id: i, name: o.name, x: Number(o.x || 0), y: Number(o.y || 0),
                 width: Number(o.width || 0), height: Number(o.height || 0),
                 scale: Number(o.scale || 1),
                 activeWorkspace: { id: ws, name: ws },
-                specialWorkspace: { id: 0 },
+                specialWorkspace: { id: sp },
                 lastIpcObject: null
             })
         }
@@ -85,6 +90,7 @@ Scope {
                 size: [Number(w.width || 0), Number(w.height || 0)],
                 monitor: index, workspace: { id: String(w.workspace || "") },
                 floating: w.floating === true,
+                focusHistoryID: Number(w.focusOrder >= 0 ? w.focusOrder : 50),
                 fullscreen: !!(w.toplevel && w.toplevel.fullscreen),
                 mapped: true, hidden: false
             })

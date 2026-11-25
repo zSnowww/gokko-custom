@@ -3,6 +3,7 @@ import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
+import Ryoku.Ui.Singletons
 import shell.services
 import shell.services as Ryoku
 import "I18n.js" as I18n
@@ -873,29 +874,147 @@ Scope {
                 onPressed: root.closeSpotlight()
             }
 
-            // Lightweight blurred wallpaper backdrop for Liquid Glass refraction
-            Image {
-                id: wallBg
+            // Live backdrop (wallpaper + visible windows behind Spotlight) for Liquid Glass refraction
+            Item {
+                id: spotBackdrop
                 anchors.fill: parent
-                visible: false
-                source: root.wallpaperUrl
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                smooth: true
+                opacity: 0
+                z: -1
+
+                Rectangle {
+                    z: -3
+                    anchors.fill: parent
+                    color: root.panelDarkMode ? "#1A1D24" : "#E6EAF2"
+                }
+                Image {
+                    id: wallBg
+                    z: -2
+                    anchors.fill: parent
+                    source: root.wallpaperUrl
+                    fillMode: Image.PreserveAspectCrop
+                    asynchronous: true
+                    smooth: true
+                }
+                ScreencopyView {
+                    id: spotOutputSnap
+                    z: -1
+                    anchors.fill: parent
+                    paintCursor: false
+                    live: false
+                    captureSource: (Wm.caps.windowGeometry !== true && Wm.caps.persistentScreenCapture === true && root.hostScreen)
+                        ? root.hostScreen : null
+                    visible: captureSource !== null && hasContent
+                }
+
+                ListModel { id: spotWm }
+                function toplevelForId(wid) {
+                    var wins = Wm.windows || [];
+                    for (var i = 0; i < wins.length; i++) {
+                        if (String(wins[i].id) === wid) return wins[i].toplevel || null;
+                    }
+                    return null;
+                }
+                function syncWindows() {
+                    if (Wm.caps.windowGeometry !== true || !root.hostScreen) {
+                        if (spotWm.count > 0) spotWm.clear();
+                        return;
+                    }
+                    var hname = root.hostScreen.name;
+                    var outs = Wm.outputs || [], mon = null;
+                    for (var i = 0; i < outs.length; i++) {
+                        if (outs[i].name === hname) { mon = outs[i]; break; }
+                    }
+                    if (!mon) {
+                        if (spotWm.count > 0) spotWm.clear();
+                        return;
+                    }
+                    var activeWs = [String(mon.activeWorkspace || "")];
+                    var wss = Wm.workspaces || [];
+                    for (var k = 0; k < wss.length; k++) {
+                        if (wss[k].special && wss[k].active && wss[k].output === hname)
+                            activeWs.push(String(wss[k].id || wss[k].name || ""));
+                    }
+                    var want = {}, wins = Wm.windows || [];
+                    var mx = Number(mon.x || 0), my = Number(mon.y || 0);
+                    var sw = spotRoot.width, sh = spotRoot.height;
+                    for (var c = 0; c < wins.length; c++) {
+                        var w = wins[c];
+                        if (!w || !w.toplevel || w.output !== hname) continue;
+                        if (activeWs.indexOf(String(w.workspace || "")) < 0) continue;
+                        var wx = Number(w.x || 0) - mx, wy = Number(w.y || 0) - my;
+                        var ww = Number(w.width || 0), wh = Number(w.height || 0);
+                        if (ww <= 0 || wh <= 0 || wx + ww <= 0 || wx >= sw || wy + wh <= 0 || wy >= sh) continue;
+                        var wz = w.floating === true ? 100 - Math.min(w.focusOrder >= 0 ? w.focusOrder : 50, 90) : 0;
+                        var wid = String(w.id);
+                        want[wid] = { wid: wid, wx: wx, wy: wy, ww: ww, wh: wh, wz: wz };
+                    }
+                    for (var j = spotWm.count - 1; j >= 0; j--) {
+                        var row = spotWm.get(j);
+                        var nw = want[row.wid];
+                        if (nw === undefined) {
+                            spotWm.remove(j);
+                        } else {
+                            if (row.wx !== nw.wx || row.wy !== nw.wy || row.ww !== nw.ww || row.wh !== nw.wh || row.wz !== nw.wz)
+                                spotWm.set(j, nw);
+                            delete want[row.wid];
+                        }
+                    }
+                    for (var idKey in want) spotWm.append(want[idKey]);
+                }
+
+                Repeater {
+                    model: spotWm
+                    delegate: Item {
+                        id: sgw
+                        required property string wid
+                        required property real wx
+                        required property real wy
+                        required property real ww
+                        required property real wh
+                        required property real wz
+                        x: wx; y: wy; width: ww; height: wh; z: wz
+                        readonly property var tl: spotBackdrop.toplevelForId(wid)
+                        ScreencopyView {
+                            anchors.fill: parent
+                            captureSource: sgw.tl
+                            live: spotWin.openish
+                            paintCursor: false
+                        }
+                    }
+                }
+
+                Connections {
+                    target: Wm
+                    function onWindowsChanged() { spotBackdrop.syncWindows(); }
+                    function onOutputsChanged() { spotBackdrop.syncWindows(); }
+                    function onWorkspacesChanged() { spotBackdrop.syncWindows(); }
+                }
+                Connections {
+                    target: root
+                    function onHostScreenChanged() { spotBackdrop.syncWindows(); }
+                    function onSpotOpenChanged() {
+                        if (root.spotOpen) {
+                            spotBackdrop.syncWindows();
+                            if (spotOutputSnap.captureSource && typeof spotOutputSnap.captureFrame === "function")
+                                spotOutputSnap.captureFrame();
+                        }
+                    }
+                }
+                Connections {
+                    target: spotRoot
+                    function onWidthChanged() { spotBackdrop.syncWindows(); }
+                    function onHeightChanged() { spotBackdrop.syncWindows(); }
+                }
+                Component.onCompleted: spotBackdrop.syncWindows()
             }
+
             ShaderEffectSource {
                 id: spSrc
-                sourceItem: wallBg.status === Image.Ready ? wallBg : wallFallback
+                sourceItem: spotBackdrop
                 hideSource: true
                 live: spotWin.openish
                 visible: false
                 sourceRect: Qt.rect(spot.x - 96, spot.y - 96, spot.width + 192, spot.height + 192)
-            }
-            Rectangle {
-                id: wallFallback
-                anchors.fill: parent
-                visible: false
-                color: root.panelDarkMode ? "#1A1D24" : "#E6EAF2"
             }
             MultiEffect {
                 id: spBlurFx
